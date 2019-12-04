@@ -1,0 +1,82 @@
+---
+title: "main"
+author: "Michael Dowd"
+date: "12/4/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE, results='hide'}
+knitr::opts_chunk$set(echo = TRUE)
+library('tidyverse')
+library('lubridate')
+```
+
+```{r Read and merge files, include=FALSE, results='hide'}
+master_dataframe <- function(Directory,MergeColumn) {
+  path <- paste("./", Directory, "/", sep = "")
+  files <- list.files(path = path)
+  dataframes = vector("list", length(files))
+  print(length(dataframes))
+  i <- 1
+  for (i in 1 : length(files)){
+    file <- files[i]
+    df <- read_csv(paste(path, file, sep = ""))
+    colnames <- names(df)
+    for (j in 1 : length(colnames)) {
+      colname <- colnames[j]
+      if (colname != 'Date') {
+        prefix <- str_replace(file, '.csv', '_')
+        colnames[j] <- paste(prefix, colname, sep = '')
+      }
+    }
+    names(df) <- colnames
+    if (i == 1) {
+      master <- df
+    }
+    else {
+      master <- merge(master, df, by="Date")
+    }
+  }  
+  return(master)
+}
+```
+
+```{r Offset dataframe creator}
+offset_dataframe <- function(Data, Offset) {
+  if (Offset<0) {
+    df <- Data %>%
+    mutate_at(vars(-Date), ~ . - lag(., -Offset)) %>%
+    drop_na()
+    return(df)
+  }
+  else if (Offset>0) {
+    df <- Data %>%
+    mutate_at(vars(-Date), ~ . - lead(., Offset)) %>%
+    drop_na()
+    return(df)
+  }
+  return(Data)
+}
+  
+```
+
+```{r Date dataframe creator}
+dates_dataframe <- function(Data) {
+  Data %>%
+    select(Date) %>%
+    mutate(Part_Of_Year = yday(Date)/365) %>%
+    mutate(Part_Of_Month = day(Date)/31) %>%
+    mutate(Part_Of_Week = case_when(weekdays(Date) == 'Monday' ~ 0,
+                           weekdays(Date) == 'Tuesday' ~ 0.25,
+                           weekdays(Date) == 'Wednesday' ~ 0.5,
+                           weekdays(Date) == 'Thursday' ~ 0.75,
+                           weekdays(Date) == 'Friday' ~ 1.0, TRUE ~ 0.0)) %>%
+  return()
+}
+```
+
+```{r Data Loading and cleaning, include=FALSE}
+data <- master_dataframe("Data")
+lag_one <- offset_dataframe(data, -1)
+dates <- dates_dataframe(data)
+```
