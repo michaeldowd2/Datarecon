@@ -6,12 +6,18 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE, results='hide'}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE)
 library('tidyverse')
 library('lubridate')
+library('reshape2')
+library('corrplot')
 ```
 
-```{r Read and merge files, include=FALSE, results='hide'}
+```{r Functions, include=FALSE, results='hide'}
+
+# --------------------------------------------------------
+# Reading Functions---------------------------------------
+
 master_dataframe <- function(Directory,MergeColumn) {
   path <- paste("./", Directory, "/", sep = "")
   files <- list.files(path = path)
@@ -39,28 +45,55 @@ master_dataframe <- function(Directory,MergeColumn) {
   }  
   return(master)
 }
-```
 
-```{r Offset dataframe creator}
+# --------------------------------------------------------
+# Feature Engineering Functions---------------------------
+
 offset_dataframe <- function(Data, Offset) {
   if (Offset<0) {
-    df <- Data %>%
+    Data <- Data %>%
     mutate_at(vars(-Date), ~ . - lag(., -Offset)) %>%
     drop_na()
-    return(df)
+    diffstr <- paste('N', toString(-Offset))
   }
   else if (Offset>0) {
-    df <- Data %>%
+    Data <- Data %>%
     mutate_at(vars(-Date), ~ . - lead(., Offset)) %>%
     drop_na()
-    return(df)
+    diffstr <- paste('P', toString(Offset))
   }
+  
+  colnames <- names(Data)
+  for (j in 1 : length(colnames)) {
+    colname <- colnames[j]
+    if (colname != 'Date') {
+      colnames[j] <- paste(colname, 'diff', diffstr, sep = '_')
+    }
+  }
+  names(Data) <- colnames
   return(Data)
 }
-  
-```
 
-```{r Date dataframe creator}
+multi_offset <- function(Data, Offsets) {
+  for (i in 1:length(Offsets)) {
+    offset <- Offsets[i]
+    df <- offset_dataframe(Data,offset)
+    if (i == 1) {
+      master <- df
+    }
+    else {
+      master <- merge(master, df, by="Date")
+    }
+  }
+  return(master)
+}
+
+standardise_all_columns <- function(Data) {
+  Data %>%
+    mutate_at(vars(-Date), ~scale(.)) %>%
+    return()
+}
+
 dates_dataframe <- function(Data) {
   Data %>%
     select(Date) %>%
@@ -73,10 +106,46 @@ dates_dataframe <- function(Data) {
                            weekdays(Date) == 'Friday' ~ 1.0, TRUE ~ 0.0)) %>%
   return()
 }
+
+# --------------------------------------------------------
+# Charting Functions--------------------------------------
+
+make_histograms <- function(Data) {
+  nrows <- as.integer(ncol(Data) / 5)
+  Data %>%
+    melt(id.vars='Date',variable.name='series') %>%
+    ggplot() +
+    aes(x = value, Fill='Red', opacity = 0.7) + 
+    geom_density() +
+    facet_wrap(. ~ series, nrow = 4)
+}
+
 ```
 
-```{r Data Loading and cleaning, include=FALSE}
+#### Input Variables before standardisation
+```{r Data Loading and cleaning}
 data <- master_dataframe("Data")
-lag_one <- offset_dataframe(data, -1)
 dates <- dates_dataframe(data)
+diff <- offset_dataframe(data, -1)
+target <- offset_dataframe(data, 1)
+make_histograms(diff)
+```
+
+#### Standardised variables
+```{r Standardise columns}
+diff <- standardise_all_columns(diff)
+target <- standardise_all_columns(target)
+make_histograms(diff)
+```
+
+#### Correlation plot
+```{r Correlation plot, fig.width=12, fig.height=12}
+t <- dates %>%
+  merge(diff, by = "Date") %>%
+  merge(target, by = "Date") %>%
+  select(-Date) %>%
+  discard(~all(is.na(.x))) %>%
+  cor()
+corrplot(t[1:(ncol(dates)+ncol(diff)-3), 
+           (ncol(dates)+ncol(diff)-2):(ncol(t))], tl.cex = 1)
 ```
