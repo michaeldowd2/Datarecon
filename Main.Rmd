@@ -138,14 +138,44 @@ target <- standardise_all_columns(target)
 make_histograms(diff)
 ```
 
-#### Correlation plot
+#### Biggest Statistically significant Correlations
 ```{r Correlation plot, fig.width=12, fig.height=12}
-t <- dates %>%
+merged <- dates %>%
   merge(diff, by = "Date") %>%
   merge(target, by = "Date") %>%
   select(-Date) %>%
-  discard(~all(is.na(.x))) %>%
-  cor()
-corrplot(t[1:(ncol(dates)+ncol(diff)-3), 
-           (ncol(dates)+ncol(diff)-2):(ncol(t))], tl.cex = 1)
+  discard(~all(is.na(.x)))
+
+corr_mat <- cor(merged)
+p_mat <- cor.mtest(merged, conf.level = 0.99)
+
+corr_df <- data.frame(corr = double(), pval = double(), i_ind = integer(), j_ind = integer())
+for (i in 1 : (ncol(dates) + ncol(diff)-3)) {
+  for (j in (ncol(dates) + ncol(diff) - 2) : (ncol(merged))) {
+    corr <- corr_mat[i, j]
+    pval <- p_mat$p[i, j]
+    i_ind <- i
+    j_ind <- j
+    corr_df <- rbind(corr_df, data.frame(corr, pval, i_ind, j_ind))
+  }
+}
+
+x <- corr_df %>%
+  filter(pval<0.01) %>%
+  group_by(i_ind) %>%
+  summarise(corr = max(corr)) %>%
+  arrange(desc(corr)) %>%
+  top_n(15) %>%
+  distinct(i_ind) %>%
+  pull(i_ind)
+y <- corr_df %>%
+  filter(pval<0.01) %>%
+  group_by(j_ind) %>%
+  summarise(corr = max(corr)) %>%
+  arrange(desc(corr)) %>%
+  top_n(15) %>%
+  distinct(j_ind) %>%
+  pull(j_ind)
+
+corrplot(corr_mat[x, y], tl.cex = 1)
 ```
