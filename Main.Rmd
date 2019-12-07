@@ -11,6 +11,14 @@ library('tidyverse')
 library('lubridate')
 library('reshape2')
 library('corrplot')
+library('RcppRoll')
+library('ggjoy')
+library('gridExtra')
+```
+
+
+```{r Global Variables, include=FALSE, results='hide'}
+VARS_TO_SHOW <-  20
 ```
 
 ```{r Functions, include=FALSE, results='hide'}
@@ -27,12 +35,19 @@ master_dataframe <- function(Directory,MergeColumn) {
   for (i in 1 : length(files)){
     file <- files[i]
     df <- read_csv(paste(path, file, sep = ""))
+    # cleaning
+    df <- df %>%
+      mutate(Date=as.numeric(format(strptime(Date,"%Y-%m-%d"),"%Y%m%d"))) %>%
+      discard(~all(is.na(.x))) %>%
+      select(which(colSums(.) != 0)) %>%
+      mutate(Date= as.Date(as.character(Date), "%Y%m%d"))
+    
     colnames <- names(df)
     for (j in 1 : length(colnames)) {
       colname <- colnames[j]
       if (colname != 'Date') {
-        prefix <- str_replace(file, '.csv', '_')
-        colnames[j] <- paste(prefix, colname, sep = '')
+        prefix <- str_replace(file, '.csv', '')
+        colnames[j] <- paste(colname, prefix, sep = '')
       }
     }
     names(df) <- colnames
@@ -54,38 +69,71 @@ offset_dataframe <- function(Data, Offset) {
     Data <- Data %>%
     mutate_at(vars(-Date), ~ . - lag(., -Offset)) %>%
     drop_na()
-    diffstr <- paste('N', toString(-Offset))
+    diffstr <- paste('DiffN', toString(-Offset), sep = '')
   }
   else if (Offset>0) {
     Data <- Data %>%
     mutate_at(vars(-Date), ~ . - lead(., Offset)) %>%
     drop_na()
-    diffstr <- paste('P', toString(Offset))
+    diffstr <- paste('DiffP', toString(Offset), sep = '')
   }
   
   colnames <- names(Data)
   for (j in 1 : length(colnames)) {
     colname <- colnames[j]
     if (colname != 'Date') {
-      colnames[j] <- paste(colname, 'diff', diffstr, sep = '_')
+      colnames[j] <- paste(colname, diffstr, sep = '_')
     }
   }
   names(Data) <- colnames
   return(Data)
 }
 
-multi_offset <- function(Data, Offsets) {
-  for (i in 1:length(Offsets)) {
-    offset <- Offsets[i]
-    df <- offset_dataframe(Data,offset)
-    if (i == 1) {
-      master <- df
-    }
-    else {
-      master <- merge(master, df, by="Date")
+window_dataframe <- function(Data, Window, Function) {
+  if (Function == 'Mean') {
+    Data <- Data %>%
+      arrange(Date) %>%
+      mutate_at(vars(-Date), ~ roll_mean(., 
+                                         Window, 
+                                         align = "right", 
+                                         fill = NA)) %>%
+      filter(!is.na(.[[2]]))
+    diffstr <- paste('Mean', toString(Window), sep = '')
+  }
+  else if (Function == 'SD') {
+    Data <- Data %>%
+      arrange(Date) %>%
+      mutate_at(vars(-Date), ~ roll_mean(., 
+                                         Window, 
+                                         align = "right", 
+                                         fill = NA)) %>%
+      filter(!is.na(.[[2]]))
+    diffstr <- paste('SD', toString(Window), sep = '')
+  }
+  
+  colnames <- names(Data)
+  for (j in 1 : length(colnames)) {
+    colname <- colnames[j]
+    if (colname != 'Date') {
+      colnames[j] <- paste(colname, diffstr, sep = '_')
     }
   }
-  return(master)
+  names(Data) <- colnames
+  return(Data)
+}
+
+multi_window <- function(Data, Windows, Funcs) {
+  for (i in 1:length(Windows)) {
+    window <- Windows[i]
+    for (j in 1 : length(Funcs)) {
+      func <- Funcs[j]
+      Data <- merge(Data, 
+                    window_dataframe(Data, window, func), 
+                    by="Date", 
+                    all = FALSE)
+    }
+  }
+  return(Data)
 }
 
 standardise_all_columns <- function(Data) {
@@ -123,12 +171,11 @@ make_histograms <- function(Data) {
 ```
 
 #### Input Variables before standardisation
-```{r Data Loading and cleaning}
+```{r Data Loading and cleaning, results='hide'}
 data <- master_dataframe("Data")
 dates <- dates_dataframe(data)
 diff <- offset_dataframe(data, -1)
 target <- offset_dataframe(data, 1)
-make_histograms(diff)
 ```
 
 #### Standardised variables
@@ -138,8 +185,12 @@ target <- standardise_all_columns(target)
 make_histograms(diff)
 ```
 
+```{r Expand variables}
+diff <- multi_window(diff, c(3), c('Mean', 'SD'))
+```
+
 #### Biggest Statistically significant Correlations
-```{r Correlation plot, fig.width=12, fig.height=12}
+```{r Correlation matrix}
 merged <- dates %>%
   merge(diff, by = "Date") %>%
   merge(target, by = "Date") %>%
@@ -149,33 +200,79 @@ merged <- dates %>%
 corr_mat <- cor(merged)
 p_mat <- cor.mtest(merged, conf.level = 0.99)
 
-corr_df <- data.frame(corr = double(), pval = double(), i_ind = integer(), j_ind = integer())
-for (i in 1 : (ncol(dates) + ncol(diff)-3)) {
-  for (j in (ncol(dates) + ncol(diff) - 2) : (ncol(merged))) {
+corr_df <- data.frame(corr = double(), 
+                      pval = double(), 
+                      i_ind = integer(), 
+                      j_ind = integer(),
+                      i_Name = character(),
+                      j_Name = character())
+for (i in 1 : (ncol(dates) + ncol(diff) - 2)) {
+  for (j in (ncol(dates) + ncol(diff) - 1) : (ncol(merged))) {
     corr <- corr_mat[i, j]
     pval <- p_mat$p[i, j]
     i_ind <- i
     j_ind <- j
-    corr_df <- rbind(corr_df, data.frame(corr, pval, i_ind, j_ind))
+    i_Name <- colnames(merged)[i]
+    j_Name <- colnames(merged)[j]
+    corr_df <- rbind(corr_df, data.frame(corr,
+                                         pval, 
+                                         i_ind, 
+                                         j_ind, 
+                                         i_Name,
+                                         j_Name))
   }
 }
+```
 
+```{r Correlation plot, fig.width=12, fig.height=12}
 x <- corr_df %>%
   filter(pval<0.01) %>%
   group_by(i_ind) %>%
   summarise(corr = max(corr)) %>%
-  arrange(desc(corr)) %>%
-  top_n(15) %>%
+  arrange(desc(abs(corr))) %>%
+  top_n(VARS_TO_SHOW) %>%
   distinct(i_ind) %>%
   pull(i_ind)
 y <- corr_df %>%
   filter(pval<0.01) %>%
   group_by(j_ind) %>%
   summarise(corr = max(corr)) %>%
-  arrange(desc(corr)) %>%
-  top_n(15) %>%
+  arrange(desc(abs(corr))) %>%
+  top_n(VARS_TO_SHOW) %>%
   distinct(j_ind) %>%
   pull(j_ind)
 
+#Correlation plot of top
 corrplot(corr_mat[x, y], tl.cex = 1)
 ```
+
+#### Correlation distribution and total sum for target variables
+```{r Correlation distributions, fig.width=12}
+# box plot for 
+plot1 <- corr_df %>%
+  filter(pval<0.01) %>%
+  mutate(j_Name = reorder(j_Name, corr**2, sum)) %>%
+  ggplot() +
+  aes(x = corr**2, y = j_Name, fill = j_Name) +
+  geom_joy() + 
+  ylab('') + 
+  xlab('Squared Correlation Distribution') +
+  theme(legend.position = "none",
+        axis.text.y = element_blank())
+
+plot2 <- corr_df %>%
+  filter(pval<0.01 )%>%
+  group_by(j_Name) %>%
+  summarise(sum_corr_squared = sum(corr**2)) %>%
+  ggplot() +
+  aes(x = reorder(j_Name, sum_corr_squared), y = sum_corr_squared, fill = sum_corr_squared) +
+  geom_bar(stat="identity") +
+  coord_flip() + 
+  xlab('') +
+  ylab('Sum of Squared Correlation') + 
+  theme(axis.text.y = element_text(size = 12),
+        legend.position = "none")
+
+grid.arrange(plot2, plot1, ncol=2)
+```
+
