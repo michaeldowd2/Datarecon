@@ -15,17 +15,19 @@ library('RcppRoll')
 library('ggjoy')
 library('gridExtra')
 library('caret')
+library(mlbench)
+library(nnet)
+library(knn)
 
 set.seed(42)
 ```
 
-
 ```{r Global Variables, include=FALSE, results='hide'}
 VARS_TO_SHOW <-  20
-DATA_FILES <- c('SANDP.csv', 'DJI.csv', 'VIX.csv')
+DATA_FILES <- c('SANDP.csv') #, 'DJI.csv', 'VIX.csv')
 TARGET_COLUMNS <- c('High', 'Low', 'Close')
 SKIP_COLUMNS <- c('Adj Close')
-AGGREGATE_WINDOWS <- c(5, 10, 20) # 3
+AGGREGATE_WINDOWS <- c(5) #, 10, 20) # 3
 AGGREGATE_FUNCTIONS <- c('Mean', 'SD') # 3 x 2 = 6
 LAGSTEPS <- 5 # 6 x (5 + 1) = 36, variable multiplier
 ```
@@ -216,11 +218,13 @@ make_histograms(diff)
 ```
 
 #### Feature Transformation
-```{r Expand variables}
+```{r Expand variables, results='hide'}
 diff <- multi_window_and_lagsteps(diff, 
                                   AGGREGATE_WINDOWS, 
                                   LAGSTEPS,
                                   AGGREGATE_FUNCTIONS)
+print(paste('Original Samples: ', str(nrow(data)), ', number of features: ', str(ncol(data)),sep=''))
+print(paste('New Samples: ', str(nrow(diff)), ', number of features: ', str(ncol(diff)), sep=''))
 ```
 
 |               | Number of Samples | Features per Sample |
@@ -319,5 +323,55 @@ grid.arrange(plot2, plot1, ncol=2)
 
 #### Modelling
 ```{r Modelling}
+# Add variable search here
 
+
+# Train models here
+inTraining <- createDataPartition(diff[[2]], p = .75, list = FALSE)
+training <- target %>%
+  select(Date, High_SANDP_DiffP1) %>%
+  merge(diff[inTraining, ], by = "Date", all = FALSE) %>%
+  select(-Date)
+
+testing <- target %>%
+  select(Date, High_SANDP_DiffP1) %>%
+  merge(diff[-inTraining, ], by = "Date", all = FALSE) %>%
+  select(-Date)
+
+## 3-fold CV with 10 repetitions
+fitControl <- trainControl(
+  method = "repeatedcv",
+  number = 3,
+  repeats = 10)
+
+# stochastic gradient boost
+gbmGrid1 <- expand.grid(interaction.depth = c(1,5,9),
+                       n.trees = (1:30)*50,
+                       shrinkage = 0.1,
+                       n.minobsinnode=20)
+gbmFit1 <- train(High_SANDP_DiffP1 ~ ., data = training, 
+                 method = "gbm", 
+                 trControl = fitControl,
+                 verbose = FALSE,
+                 tuneGrid = gbmGrid1)
+ggplot(gbmFit1)
+
+
+#K nearest neighbours
+gbmGrid2 <- expand.grid(k= (3:9))
+gbmFit2 <- train(High_SANDP_DiffP1 ~ ., data = training, 
+                 method = "knn", 
+                 trControl = fitControl,
+                 verbose = FALSE,
+                 tuneGrid = gbmGrid2)
+ggplot(gbmFit2)
+
+#neuraal network neighbours
+gbmGrid3 <- expand.grid(size= (3:9))
+gbmFit3 <- train(High_SANDP_DiffP1 ~ ., data = training, 
+                 method = "nnet", 
+                 trControl = fitControl,
+                 verbose = FALSE,
+                 tuneGrid = gbmGrid3)
+ggplot(gbmFit3)
 ```
