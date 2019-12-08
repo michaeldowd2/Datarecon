@@ -14,11 +14,20 @@ library('corrplot')
 library('RcppRoll')
 library('ggjoy')
 library('gridExtra')
+library('caret')
+
+set.seed(42)
 ```
 
 
 ```{r Global Variables, include=FALSE, results='hide'}
 VARS_TO_SHOW <-  20
+DATA_FILES <- c('SANDP.csv', 'DJI.csv', 'VIX.csv')
+TARGET_COLUMNS <- c('High', 'Low', 'Close')
+SKIP_COLUMNS <- c('Adj Close')
+AGGREGATE_WINDOWS <- c(5, 10, 20) # 3
+AGGREGATE_FUNCTIONS <- c('Mean', 'SD') # 3 x 2 = 6
+LAGSTEPS <- 5 # 6 x (5 + 1) = 36, variable multiplier
 ```
 
 ```{r Functions, include=FALSE, results='hide'}
@@ -26,28 +35,28 @@ VARS_TO_SHOW <-  20
 # --------------------------------------------------------
 # Reading Functions---------------------------------------
 
-master_dataframe <- function(Directory,MergeColumn) {
+master_dataframe <- function(Directory, Files, SkipCols) {
   path <- paste("./", Directory, "/", sep = "")
-  files <- list.files(path = path)
-  dataframes = vector("list", length(files))
+  dataframes = vector("list", length(Files))
   print(length(dataframes))
   i <- 1
-  for (i in 1 : length(files)){
-    file <- files[i]
+  for (i in 1 : length(Files)){
+    file <- Files[i]
     df <- read_csv(paste(path, file, sep = ""))
     # cleaning
     df <- df %>%
       mutate(Date=as.numeric(format(strptime(Date,"%Y-%m-%d"),"%Y%m%d"))) %>%
       discard(~all(is.na(.x))) %>%
       select(which(colSums(.) != 0)) %>%
-      mutate(Date= as.Date(as.character(Date), "%Y%m%d"))
+      mutate(Date= as.Date(as.character(Date), "%Y%m%d")) %>%
+      select(-one_of(SkipCols))
     
     colnames <- names(df)
     for (j in 1 : length(colnames)) {
       colname <- colnames[j]
       if (colname != 'Date') {
         prefix <- str_replace(file, '.csv', '')
-        colnames[j] <- paste(colname, prefix, sep = '')
+        colnames[j] <- paste(colname, prefix, sep = '_')
       }
     }
     names(df) <- colnames
@@ -64,7 +73,7 @@ master_dataframe <- function(Directory,MergeColumn) {
 # --------------------------------------------------------
 # Feature Engineering Functions---------------------------
 
-offset_dataframe <- function(Data, Offset) {
+diff_dataframe <- function(Data, Offset) {
   if (Offset<0) {
     Data <- Data %>%
     mutate_at(vars(-Date), ~ . - lag(., -Offset)) %>%
@@ -89,24 +98,45 @@ offset_dataframe <- function(Data, Offset) {
   return(Data)
 }
 
+lag_dataframe <- function(Data, Lag) {
+  Data <- Data %>%
+    mutate_at(vars(-Date), ~ lag(., Lag)) %>%
+    drop_na()
+    diffstr <- paste('Lag', toString(Lag), sep = '')
+  
+  colnames <- names(Data)
+  for (j in 1 : length(colnames)) {
+    colname <- colnames[j]
+    if (colname != 'Date') {
+      colnames[j] <- paste(colname, diffstr, sep = '_')
+    }
+  }
+  names(Data) <- colnames
+  return(Data)
+}
+
+lagsteps_and_expand_dataframe <- function(Data, Window, LagSteps) {
+  master <- Data
+  for (i in 1:LagSteps) {
+    lag <- i * Window
+    df <- lag_dataframe(Data, lag)
+    master <- merge(master, df, by = "Date", all = FALSE)
+  }
+  return(master)
+}
+
 window_dataframe <- function(Data, Window, Function) {
   if (Function == 'Mean') {
     Data <- Data %>%
       arrange(Date) %>%
-      mutate_at(vars(-Date), ~ roll_mean(., 
-                                         Window, 
-                                         align = "right", 
-                                         fill = NA)) %>%
+      mutate_at(vars(-Date), ~ roll_mean(., Window, align = "right", fill = NA)) %>%
       filter(!is.na(.[[2]]))
     diffstr <- paste('Mean', toString(Window), sep = '')
   }
   else if (Function == 'SD') {
     Data <- Data %>%
       arrange(Date) %>%
-      mutate_at(vars(-Date), ~ roll_mean(., 
-                                         Window, 
-                                         align = "right", 
-                                         fill = NA)) %>%
+      mutate_at(vars(-Date), ~ roll_mean(., Window, align = "right", fill = NA)) %>%
       filter(!is.na(.[[2]]))
     diffstr <- paste('SD', toString(Window), sep = '')
   }
@@ -122,18 +152,18 @@ window_dataframe <- function(Data, Window, Function) {
   return(Data)
 }
 
-multi_window <- function(Data, Windows, Funcs) {
-  for (i in 1:length(Windows)) {
-    window <- Windows[i]
-    for (j in 1 : length(Funcs)) {
-      func <- Funcs[j]
-      Data <- merge(Data, 
-                    window_dataframe(Data, window, func), 
-                    by="Date", 
-                    all = FALSE)
-    }
+multi_window_and_lagsteps <- function(Data, Windows, LagSteps, Funcs) {
+  master <- lagsteps_and_expand_dataframe(Data, 1, LagSteps)
+  for (i in 1 : length(Windows)) {
+   window <- Windows[i]
+   for (j in 1 : length(Funcs)) {
+     func <- Funcs[j]
+     df <- window_dataframe(Data, window, func)
+     df <- lagsteps_and_expand_dataframe(df, window, LagSteps)
+     master <- merge(master, df, by = "Date", all = FALSE)
+   }
   }
-  return(Data)
+  return(master)
 }
 
 standardise_all_columns <- function(Data) {
@@ -172,10 +202,10 @@ make_histograms <- function(Data) {
 
 #### Input Variables before standardisation
 ```{r Data Loading and cleaning, results='hide'}
-data <- master_dataframe("Data")
+data <- master_dataframe("Data", DATA_FILES, SKIP_COLUMNS)
 dates <- dates_dataframe(data)
-diff <- offset_dataframe(data, -1)
-target <- offset_dataframe(data, 1)
+diff <- diff_dataframe(data, -1)
+target <- diff_dataframe(data, 1)
 ```
 
 #### Standardised variables
@@ -185,9 +215,19 @@ target <- standardise_all_columns(target)
 make_histograms(diff)
 ```
 
+#### Feature Transformation
 ```{r Expand variables}
-diff <- multi_window(diff, c(3), c('Mean', 'SD'))
+diff <- multi_window_and_lagsteps(diff, 
+                                  AGGREGATE_WINDOWS, 
+                                  LAGSTEPS,
+                                  AGGREGATE_FUNCTIONS)
 ```
+
+|               | Number of Samples | Features per Sample |
+| ------------- |:-------------:| -----:|
+| Original Samples | `r nrow(data)` | `r ncol(data)` |
+| Transformed Samples | `r nrow(diff)` | `r ncol(diff)` |
+
 
 #### Biggest Statistically significant Correlations
 ```{r Correlation matrix}
@@ -246,7 +286,7 @@ y <- corr_df %>%
 corrplot(corr_mat[x, y], tl.cex = 1)
 ```
 
-#### Correlation distribution and total sum for target variables
+#### Statistically significant (p-value < 0.01) correlations for target variables
 ```{r Correlation distributions, fig.width=12}
 # box plot for 
 plot1 <- corr_df %>%
@@ -276,3 +316,8 @@ plot2 <- corr_df %>%
 grid.arrange(plot2, plot1, ncol=2)
 ```
 
+
+#### Modelling
+```{r Modelling}
+
+```
