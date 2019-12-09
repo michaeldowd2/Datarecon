@@ -17,7 +17,6 @@ library('gridExtra')
 library('caret')
 library(mlbench)
 library(nnet)
-library(knn)
 
 set.seed(42)
 ```
@@ -25,11 +24,11 @@ set.seed(42)
 ```{r Global Variables, include=FALSE, results='hide'}
 VARS_TO_SHOW <-  20
 DATA_FILES <- c('SANDP.csv') #, 'DJI.csv', 'VIX.csv')
-TARGET_COLUMNS <- c('High', 'Low', 'Close')
 SKIP_COLUMNS <- c('Adj Close')
 AGGREGATE_WINDOWS <- c(5) #, 10, 20) # 3
 AGGREGATE_FUNCTIONS <- c('Mean', 'SD') # 3 x 2 = 6
 LAGSTEPS <- 5 # 6 x (5 + 1) = 36, variable multiplier
+DIFF_CLASSES <- c(0.1, 1, 2) # labels for small move, medium move and large move
 ```
 
 ```{r Functions, include=FALSE, results='hide'}
@@ -168,6 +167,39 @@ multi_window_and_lagsteps <- function(Data, Windows, LagSteps, Funcs) {
   return(master)
 }
 
+generate_targets <- function(Targets, Diff_Class, Direction) {
+  if (Direction == 'U') {
+    df <- Targets %>%
+       mutate_at(vars(-Date), ~ if_else(. > Diff_Class, 1, 0))
+  }
+  else if (Direction == 'D') {
+    df <- Targets %>%
+       mutate_at(vars(-Date), ~ if_else(. < -Diff_Class, 1, 0))
+  }
+  diffstr <- paste(Direction, toString(Diff_Class), sep = '')
+  colnames <- names(df)
+  for (j in 1 : length(colnames)) {
+    colname <- colnames[j]
+    if (colname != 'Date') {
+      colnames[j] <- paste(colname, diffstr, sep = '_')
+    }
+  }
+  names(df) <- colnames
+  return(df)
+}
+
+multi_generate_targets <- function(Targets, Diff_Classes) {
+  master <- Targets
+  for (i in 1 : length(Diff_Classes)) {
+    diff_class <- Diff_Classes[i]
+    udf <- generate_targets(Targets, diff_class, 'U')
+    master <- merge(master, udf, by = "Date", all = FALSE)
+    ddf <- generate_targets(Targets, diff_class, 'D')
+    master <- merge(master, ddf, by = "Date", all = FALSE)
+  }
+  return(master)
+}
+
 standardise_all_columns <- function(Data) {
   Data %>%
     mutate_at(vars(-Date), ~scale(.)) %>%
@@ -176,7 +208,6 @@ standardise_all_columns <- function(Data) {
 
 dates_dataframe <- function(Data) {
   Data %>%
-    select(Date) %>%
     mutate(Part_Of_Year = yday(Date)/365) %>%
     mutate(Part_Of_Month = day(Date)/31) %>%
     mutate(Part_Of_Week = case_when(weekdays(Date) == 'Monday' ~ 0,
@@ -202,42 +233,33 @@ make_histograms <- function(Data) {
 
 ```
 
-#### Input Variables before standardisation
+#### Original Features
 ```{r Data Loading and cleaning, results='hide'}
 data <- master_dataframe("Data", DATA_FILES, SKIP_COLUMNS)
-dates <- dates_dataframe(data)
-diff <- diff_dataframe(data, -1)
-target <- diff_dataframe(data, 1)
+features <- data %>%
+  diff_dataframe(-1) %>%
+  standardise_all_columns() %>%
+  multi_window_and_lagsteps(AGGREGATE_WINDOWS, LAGSTEPS, AGGREGATE_FUNCTIONS) %>%
+  dates_dataframe()
+
+labels <- data %>% 
+  diff_dataframe(1) %>%
+  standardise_all_columns() %>% 
+  multi_generate_targets(DIFF_CLASSES)
+
 ```
 
-#### Standardised variables
-```{r Standardise columns}
-diff <- standardise_all_columns(diff)
-target <- standardise_all_columns(target)
-make_histograms(diff)
-```
+#### Feature and Label Expansion
 
-#### Feature Transformation
-```{r Expand variables, results='hide'}
-diff <- multi_window_and_lagsteps(diff, 
-                                  AGGREGATE_WINDOWS, 
-                                  LAGSTEPS,
-                                  AGGREGATE_FUNCTIONS)
-print(paste('Original Samples: ', str(nrow(data)), ', number of features: ', str(ncol(data)),sep=''))
-print(paste('New Samples: ', str(nrow(diff)), ', number of features: ', str(ncol(diff)), sep=''))
-```
-
-|               | Number of Samples | Features per Sample |
-| ------------- |:-------------:| -----:|
-| Original Samples | `r nrow(data)` | `r ncol(data)` |
-| Transformed Samples | `r nrow(diff)` | `r ncol(diff)` |
-
+|               | Number of Samples | Features per Sample | Labels per Sample |
+| ------------- |:-------------:| -----:| -----:|
+| Original Samples | `r nrow(data)` | `r ncol(data)` | `r ncol(data)` |
+| Transformed Samples | `r nrow(features)` | `r ncol(features)` | `r ncol(labels)` |
 
 #### Biggest Statistically significant Correlations
 ```{r Correlation matrix}
-merged <- dates %>%
-  merge(diff, by = "Date") %>%
-  merge(target, by = "Date") %>%
+merged <- features %>%
+  merge(labels, by = "Date") %>%
   select(-Date) %>%
   discard(~all(is.na(.x)))
 
@@ -250,8 +272,8 @@ corr_df <- data.frame(corr = double(),
                       j_ind = integer(),
                       i_Name = character(),
                       j_Name = character())
-for (i in 1 : (ncol(dates) + ncol(diff) - 2)) {
-  for (j in (ncol(dates) + ncol(diff) - 1) : (ncol(merged))) {
+for (i in 1 : (ncol(features) - 1)) {
+  for (j in (ncol(features) : ncol(merged))) {
     corr <- corr_mat[i, j]
     pval <- p_mat$p[i, j]
     i_ind <- i
@@ -268,7 +290,7 @@ for (i in 1 : (ncol(dates) + ncol(diff) - 2)) {
 }
 ```
 
-```{r Correlation plot, fig.width=12, fig.height=12}
+```{r Correlation plot, fig.width=12, fig.height=10}
 x <- corr_df %>%
   filter(pval<0.01) %>%
   group_by(i_ind) %>%
@@ -322,56 +344,89 @@ grid.arrange(plot2, plot1, ncol=2)
 
 
 #### Modelling
-```{r Modelling}
+```{r Training and Testing data}
 # Add variable search here
-
 
 # Train models here
 inTraining <- createDataPartition(diff[[2]], p = .75, list = FALSE)
-training <- target %>%
-  select(Date, High_SANDP_DiffP1) %>%
+training <- labels %>%
+  select(Date, High_SANDP_DiffP1_U1) %>%
+  mutate(label = if_else(High_SANDP_DiffP1_U1 == 1, 'GO', 'ST')) %>%
   merge(diff[inTraining, ], by = "Date", all = FALSE) %>%
-  select(-Date)
+  select(-Date, -High_SANDP_DiffP1_U1)
 
-testing <- target %>%
-  select(Date, High_SANDP_DiffP1) %>%
+testing <- labels %>%
+  select(Date, High_SANDP_DiffP1_U1) %>%
+  mutate(label = if_else(High_SANDP_DiffP1_U1 == 1, 'GO', 'ST')) %>%
   merge(diff[-inTraining, ], by = "Date", all = FALSE) %>%
-  select(-Date)
+  select(-Date, -High_SANDP_DiffP1_U1)
 
 ## 3-fold CV with 10 repetitions
 fitControl <- trainControl(
   method = "repeatedcv",
   number = 3,
-  repeats = 10)
+  repeats = 3)
 
-# stochastic gradient boost
-gbmGrid1 <- expand.grid(interaction.depth = c(1,5,9),
-                       n.trees = (1:30)*50,
-                       shrinkage = 0.1,
-                       n.minobsinnode=20)
-gbmFit1 <- train(High_SANDP_DiffP1 ~ ., data = training, 
-                 method = "gbm", 
-                 trControl = fitControl,
-                 verbose = FALSE,
-                 tuneGrid = gbmGrid1)
-ggplot(gbmFit1)
+# baselines
+n_zeros <- training %>% filter(label=='ST') %>% nrow()
+n_ones <- training %>% filter(label=='GO') %>% nrow()
+n_tot <- training %>% nrow()
 
+just_stays <- training %>%
+  filter(label == 'ST') %>%
+  top_n(n_ones, .[[2]]) 
 
-#K nearest neighbours
-gbmGrid2 <- expand.grid(k= (3:9))
-gbmFit2 <- train(High_SANDP_DiffP1 ~ ., data = training, 
-                 method = "knn", 
-                 trControl = fitControl,
-                 verbose = FALSE,
-                 tuneGrid = gbmGrid2)
-ggplot(gbmFit2)
+training_bal <- training %>%
+  filter(label == 'GO') %>%
+  rbind(just_stays)
 
-#neuraal network neighbours
-gbmGrid3 <- expand.grid(size= (3:9))
-gbmFit3 <- train(High_SANDP_DiffP1 ~ ., data = training, 
-                 method = "nnet", 
-                 trControl = fitControl,
-                 verbose = FALSE,
-                 tuneGrid = gbmGrid3)
-ggplot(gbmFit3)
+print(paste('Training set size: ', toString(nrow(training))))
+print(paste('All zeros baseline accuracy: ', toString(n_zeros/n_tot)))
+
+print(paste('Balanced Training set size: ', toString(nrow(training_bal))))
+print('All zeros baseline accuracy: 0.5')
+```
+
+|               | Number of Samples | All Zeros Baseline |
+| ------------- |:-------------:| -----:|
+| Training Set | `r nrow(training)` | `r n_zeros/n_tot` |
+| Balanced Training Set | `r nrow(training_bal)` | 0.5 |
+
+``` {r Linear Model}
+gbmGrid1 <- expand.grid(interaction.depth = c(1,5,9), n.trees = (1:30)*50, shrinkage = 0.1, n.minobsinnode=20)
+
+gbmFit1 <- train(label ~ ., data = training, method = "gbm", trControl = fitControl,
+                 verbose = FALSE, tuneGrid = gbmGrid1, metric = "Kappa")
+gbmFit1_bal <- train(label ~ ., data = training_bal, method = "gbm", trControl = fitControl, 
+                     verbose = FALSE, tuneGrid = gbmGrid1)
+```
+
+``` {r K Nearest Neighbours}
+gbmGrid2 <- expand.grid(k= (3:20))
+gbmFit2 <- train(label ~ ., data = training, method = "knn", metric = "Kappa",
+                 trControl = fitControl, tuneGrid = gbmGrid2)
+gbmFit2_bal <- train(label ~ ., data = training_bal, method = "knn", 
+                     trControl = fitControl, tuneGrid = gbmGrid2)
+```
+
+```{r neural network model}
+gbmGrid3 <- expand.grid(size= (5:10), decay = c(1.0e-3, 1.0e-2, 1.0e-1))
+gbmFit3 <- train(label ~ ., data = training, method = "nnet", metric = "Kappa",
+                 trControl = fitControl, tuneGrid = gbmGrid3)
+gbmFit3_bal <- train(label ~ ., data = training_bal, method = "nnet",
+                 trControl = fitControl, tuneGrid = gbmGrid3)
+```
+
+``` {r model plots, fig.width = 12, fig.height = 12}
+
+plot1 <- plot(gbmFit1, metrick = "Kappa")
+plot2 <- plot(gbmFit1_bal, metrick = "Kappa")
+
+plot3 <- plot(gbmFit2, metric = "Kappa")
+plot4 <- plot(gbmFit2_bal, metric = "Kappa")
+
+plot5 <- plot(gbmFit3, metric="Kappa")
+plot6 <- plot(gbmFit3_bal, metric="Kappa")
+
+grid.arrange(plot1, plot2, plot3, plot4, plot5, plot6, nrow = 3, ncol = 2)
 ```
