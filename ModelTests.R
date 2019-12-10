@@ -6,6 +6,8 @@ library(gbm)
 library(e1071)
 library(kernlab)
 library(klaR)
+library(GA)
+library(xgboost)
 set.seed(998)
 
 data(Sonar)
@@ -36,6 +38,16 @@ gbmFit2
 ggplot(gbmFit2) +
   theme_minimal()
 
+gbmGrid3 <- expand.grid(size= (5:10), decay = c(1.0e-3, 1.0e-2, 1.0e-1))
+gbmFit3 <- train(x = x, y = y, 
+                 method = "xgbTree", 
+                 verbose = TRUE)
+varImp(gbmFit3, scale = FALSE) %>%
+  ggplot() +
+  aes(x=Overall) +
+  geom_line()
+
+
 plot(gbmFit2, metric = "Kappa", plotType = "level", 
      scales = list(x = list(rot = 90)))
 
@@ -59,3 +71,30 @@ bwplot(resamps, layout = c(2,1))
 dotplot(resamps, metric="Accuracy")
 
 splom(resamps)
+
+n <- 100
+p <- 40
+sigma <- 1
+set.seed(1)
+sim <- mlbench.friedman1(n, sd = sigma)
+colnames(sim$x) <- c(paste("real", 1:5, sep = ""),
+                     paste("bogus", 1:5, sep = ""))
+bogus <- matrix(rnorm(n * p), nrow = n)
+colnames(bogus) <- paste("bogus", 5+(1:ncol(bogus)), sep = "")
+x <- cbind(sim$x, bogus)
+y <- sim$y
+normalization <- preProcess(x)
+x <- predict(normalization, x)
+x <- as.data.frame(x)
+
+ga_ctrl <- gafsControl(functions = caretGA,
+                       method = "cv",
+                       number = 10)
+
+set.seed(10)
+rf_ga <- gafs(x = x, y = y,
+              iters = 10,
+              gafsControl = ga_ctrl,
+              method = 'lm',
+              trControl = trainControl(method = "cv", allowParallel = TRUE))
+rf_ga

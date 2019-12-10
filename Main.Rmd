@@ -233,7 +233,7 @@ make_histograms <- function(Data) {
 
 ```
 
-#### Original Features
+#### Feature and Label Expansion
 ```{r Data Loading and cleaning, results='hide'}
 data <- master_dataframe("Data", DATA_FILES, SKIP_COLUMNS)
 features <- data %>%
@@ -248,8 +248,6 @@ labels <- data %>%
   multi_generate_targets(DIFF_CLASSES)
 
 ```
-
-#### Feature and Label Expansion
 
 |               | Number of Samples | Features per Sample | Labels per Sample |
 | ------------- |:-------------:| -----:| -----:|
@@ -312,7 +310,7 @@ y <- corr_df %>%
 corrplot(corr_mat[x, y], tl.cex = 1)
 ```
 
-#### Statistically significant (p-value < 0.01) correlations for target variables
+#### Statistically significant (p-value < 0.01) Correlations for target variables
 ```{r Correlation distributions, fig.width=12}
 # box plot for 
 plot1 <- corr_df %>%
@@ -342,12 +340,8 @@ plot2 <- corr_df %>%
 grid.arrange(plot2, plot1, ncol=2)
 ```
 
-
-#### Modelling
+#### Training and Testing Data
 ```{r Training and Testing data}
-# Add variable search here
-
-# Train models here
 inTraining <- createDataPartition(diff[[2]], p = .75, list = FALSE)
 training <- labels %>%
   select(Date, High_SANDP_DiffP1_U1) %>%
@@ -392,6 +386,52 @@ print('All zeros baseline accuracy: 0.5')
 | Training Set | `r nrow(training)` | `r n_zeros/n_tot` |
 | Balanced Training Set | `r nrow(training_bal)` | 0.5 |
 
+``` {r pearson's correlation Variable search, fig.height = 6, fig.width=12}
+cor <- training %>%
+  select(label) %>%
+  mutate(label = if_else(label == "GO", 1, 0)) %>%
+  as.matrix() %>%
+  cor(as.matrix(select(training, -label)))
+
+cor_bal <- training_bal %>%
+  select(label) %>%
+  mutate(label = if_else(label == "GO", 1, 0)) %>%
+  as.matrix() %>%
+  cor(as.matrix(select(training_bal, -label)))
+```
+
+``` {r xgradientboost tree variable search, fig.height = 6, fig.width=12}
+xgbTree <- train(label ~ ., data = training, 
+                 method = "xgbTree")
+gbmImp <- varImp(xgbTree, scale = FALSE)
+
+xgbTree_bal <- train(label ~ ., data = training_bal, 
+                 method = "xgbTree")
+gbmImp_bal <- varImp(xgbTree_bal, scale = FALSE)
+```
+
+``` {r variable search graphs, fig.width=12}
+plot1 <- data.frame(data = colnames(cor), abs_corr = abs(cor[1,])) %>%
+  top_n(20, abs_corr) %>%
+  ggplot() +
+  aes(x = reorder(data, abs_corr), y = abs_corr) +
+  geom_bar(stat="identity") +
+  xlab('')+
+  coord_flip()
+
+plot2 <- data.frame(data = colnames(cor_bal), abs_corr = abs(cor_bal[1,])) %>%
+  top_n(20, abs_corr) %>%
+  ggplot() +
+  aes(x = reorder(data, abs_corr), y = abs_corr) +
+  geom_bar(stat="identity") +
+  xlab('')+
+  coord_flip()
+
+plot3 <- ggplot(gbmImp, top = 20) + xlab('')
+plot4 <- ggplot(gbmImp_bal, top = 20) + xlab('')
+grid.arrange(plot1, plot2, plot3, plot4, nrow=2,ncol=2)
+```
+
 ``` {r Linear Model}
 gbmGrid1 <- expand.grid(interaction.depth = c(1,5,9), n.trees = (1:30)*50, shrinkage = 0.1, n.minobsinnode=20)
 
@@ -417,6 +457,7 @@ gbmFit3_bal <- train(label ~ ., data = training_bal, method = "nnet",
                  trControl = fitControl, tuneGrid = gbmGrid3)
 ```
 
+#### Cross validated model params and accuracies
 ``` {r model plots, fig.width = 12, fig.height = 12}
 
 plot1 <- plot(gbmFit1, metrick = "Kappa")
