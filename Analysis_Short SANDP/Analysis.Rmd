@@ -21,16 +21,32 @@ set.seed(42)
 ```
 
 ```{r Global Variables, include=FALSE, results='hide'}
-VARS_TO_SHOW <-  20
-DATA_FILES <- c('SANDP.csv') #, 'DJI.csv', 'VIX.csv')
-SKIP_COLUMNS <- c('Adj Close')
-TARGET_COLS <- c('Close')
-LAGGED_FEATURE_COLS <- c('High, Low, Close) #, Volume')
-AVAILABLE_FEATURE_COLS <- c('Open')
+# Analysis Mode
+# 0 - Full Backtest: run over a over historic days with retraining after every day
+# 1 - Retrain: retrain models using the latest data
+# 2 - Prediction: just load data and run predictions using the latest data
+# 3 - Partial Backtest: for debugging, skip the retraining 
+ANALYSIS_MODE = 0
+BACKTEST_DAYS = 5
+MODEL_TRAINING_DAYS = 10
+ENSEMBLE_TRAINING_DAYS = 10
+
+# Targets and Features
+DATA_FILES <- c('SANDP.csv', 'DJI.csv', 'VIX.csv')
+TARGET_COLS <- c('SANDP.Close')
+TARGET_LEADS <- c(0) 
+TARGET_DIFFS <- c(-0.1, -0.7) # std diff
+FEATURE_COLS <- c('SANDP.Open', 'SANDP.High', 'SANDP.Low', 'SANDP.Close', 'DJI.Close', 'VIX.Close')
+FEATURE_LAGS <- c(0, 1, 1, 1, 1, 1) 
+
+# Feature Engineering
 AGGREGATE_WINDOWS <- c(5) #, 10, 20) # 3
 AGGREGATE_FUNCTIONS <- c('Mean') #, 'SD') # 3 x 2 = 6
 LAGSTEPS <- 5 # 6 x (5 + 1) = 36, variable multiplier
 DIFF_CLASSES <- c(0.1) # , 1, 2) # labels for small move, medium move and large move
+
+# Display Options
+VARS_TO_SHOW <-  20
 ```
 
 ```{r Functions, include=FALSE, results='hide'}
@@ -38,32 +54,23 @@ DIFF_CLASSES <- c(0.1) # , 1, 2) # labels for small move, medium move and large 
 # --------------------------------------------------------
 # Reading Functions---------------------------------------
 
-master_dataframe <- function(Files, SkipCols) {
+master_dataframe <- function(Files, Columns) {
   parent_path <- substr(getwd(), 1, regexpr("\\/[^\\/]*$", getwd()))
   path <- paste(parent_path, 'Data/', sep = "")
   dataframes = vector("list", length(Files))
-  print(length(dataframes))
-  i <- 1
-  for (i in 1 : length(Files)){
+  for (i in 1 : length(Files)) {
     file <- Files[i]
+    prefix <- str_replace(file, 'csv', '')
     df <- read_csv(paste(path, file, sep = ""))
-    # cleaning
     df <- df %>%
       mutate(Date=as.numeric(format(strptime(Date,"%Y-%m-%d"),"%Y%m%d"))) %>%
       discard(~all(is.na(.x))) %>%
       select(which(colSums(.) != 0)) %>%
       mutate(Date= as.Date(as.character(Date), "%Y%m%d")) %>%
-      select(-one_of(SkipCols))
+      select(one_of(c('Date', str_replace(Columns, prefix, ''))))
     
-    colnames <- names(df)
-    for (j in 1 : length(colnames)) {
-      colname <- colnames[j]
-      if (colname != 'Date') {
-        prefix <- str_replace(file, '.csv', '')
-        colnames[j] <- paste(colname, prefix, sep = '_')
-      }
-    }
-    names(df) <- colnames
+    names(df)[-1] <- paste(prefix, colnames(df)[-1], sep = "")
+
     if (i == 1) {
       master <- df
     }
@@ -72,6 +79,28 @@ master_dataframe <- function(Files, SkipCols) {
     }
   }  
   return(master)
+}
+
+create_dateranges <- function(Features, Labels) {
+  dates <- Features %>%
+    merge(Labels, by = "Date", all = FALSE) %>%
+    select(Date)
+  dataframes <- list()
+  steps <- c(1)
+  n <- length(dates$Date)
+  if (ANALYSIS_MODE == 0 | ANALYSIS_MODE == 3) steps <- c(BACKTEST_DAYS:1)
+  index <- 1
+  print(steps)
+  for (i in steps) {
+    latest_date <- sort(dates$Date,partial=n-i)[n-i]
+    dataframes[index] <- dates %>%
+      filter(Date <= latest_date) %>%
+      arrange(desc(Date)) %>%
+      top_n(MODEL_TRAINING_DAYS + ENSEMBLE_TRAINING_DAYS)
+    index <- index + 1
+  }
+  
+  return(dataframes)
 }
 
 # --------------------------------------------------------
@@ -100,6 +129,36 @@ diff_dataframe <- function(Data, Offset) {
   }
   names(Data) <- colnames
   return(Data)
+}
+
+# At the moment of trading some data won't be available and some will
+runtime_offsets <- function(Data, Columns, Lags = NULL, Leads = NULL) {
+  res <- Data %>% select(one_of(c('Date', Columns)))
+  
+  if (!is.null(Leads)) { #leading somme target columns
+    for (i in 1:length(Columns)) {
+      col_name <- Columns[i]
+      lead_int <- Leads[i]
+      new_col_name <- col_name
+      if (lead_int > 0) new_col_name <- paste(col_name, '.LEAD', toString(lead_int), sep = "" )
+      res <- res %>%
+        mutate_at(vars(col_name), ~ lead(., lead_int)) %>%
+        rename(!!new_col_name := !!col_name)
+    }
+  }
+  else {
+    for (i in 1:length(Columns)) {
+      col_name <- Columns[i]
+      lag_int <- Lags[i]
+      new_col_name <- col_name
+      if (lag_int > 0) new_col_name <- paste(col_name, '.LAG', toString(lag_int), sep = "" )
+      res <-  res %>%
+        mutate_at(vars(col_name), ~ lag(., lag_int)) %>%
+        rename(!!new_col_name := !!col_name)
+    }
+  }
+  
+  res %>%  drop_na() %>% return()
 }
 
 lag_dataframe <- function(Data, Lag) {
@@ -238,17 +297,26 @@ make_histograms <- function(Data) {
 
 #### Feature and Label Expansion
 ```{r Data Loading and cleaning, results='hide'}
-data <- master_dataframe(DATA_FILES, SKIP_COLUMNS)
-features <- data %>%
-  diff_dataframe(-1) %>%
-  standardise_all_columns() %>%
-  multi_window_and_lagsteps(AGGREGATE_WINDOWS, LAGSTEPS, AGGREGATE_FUNCTIONS) %>%
-  dates_dataframe()
+data <- master_dataframe(DATA_FILES, c(FEATURE_COLS1, TARGET_COLS))
 
-labels <- data %>% 
-  diff_dataframe(1) %>%
-  standardise_all_columns() %>% 
-  multi_generate_targets(DIFF_CLASSES)
+features <- data %>%
+  runtime_offsets(Columns = FEATURE_COLS, Lags = FEATURE_LAGS)
+
+labels <- data %>%
+  runtime_offsets(Columns = TARGET_COLS, Leads = TARGET_LEADS)
+  
+dateranges <- create_dateranges(features, labels)
+
+#features <- data %>%
+#  diff_dataframe(-1) %>%
+#  standardise_all_columns() %>%
+#  multi_window_and_lagsteps(AGGREGATE_WINDOWS, LAGSTEPS, AGGREGATE_FUNCTIONS) %>%
+#  dates_dataframe()
+
+#labels <- data %>% 
+#  diff_dataframe(1) %>%
+#  standardise_all_columns() %>% 
+#  multi_generate_targets(DIFF_CLASSES)
 
 ```
 
