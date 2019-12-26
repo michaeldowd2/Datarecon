@@ -1,0 +1,31 @@
+---
+title: "Home"
+author: "Michael Dowd"
+date: "12/26/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data downlaod
+
+
+|               | Start | Finish |
+| ------------- |:-------------:|:-------------:|
+| Data Downlaod | X | Y |
+
+## Live analysis predictions
+
+
+|               | Start | Finish |
+| ------------- |:-------------:|:-------------:|
+| Analysis Predictions | X | Y |
+
+## Analysis reruns and model training
+
+
+|               | Start | Finish |
+| ------------- |:-------------:|:-------------:|
+| Analysis rerun | X | Y |

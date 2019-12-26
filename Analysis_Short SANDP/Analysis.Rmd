@@ -1,5 +1,5 @@
 ---
-title: "main"
+title: "Short S & P Analysis"
 author: "Michael Dowd"
 date: "12/4/2019"
 output: html_document
@@ -17,7 +17,6 @@ library('gridExtra')
 library('caret')
 library(mlbench)
 library(nnet)
-
 set.seed(42)
 ```
 
@@ -25,10 +24,13 @@ set.seed(42)
 VARS_TO_SHOW <-  20
 DATA_FILES <- c('SANDP.csv') #, 'DJI.csv', 'VIX.csv')
 SKIP_COLUMNS <- c('Adj Close')
+TARGET_COLS <- c('Close')
+LAGGED_FEATURE_COLS <- c('High, Low, Close) #, Volume')
+AVAILABLE_FEATURE_COLS <- c('Open')
 AGGREGATE_WINDOWS <- c(5) #, 10, 20) # 3
-AGGREGATE_FUNCTIONS <- c('Mean', 'SD') # 3 x 2 = 6
+AGGREGATE_FUNCTIONS <- c('Mean') #, 'SD') # 3 x 2 = 6
 LAGSTEPS <- 5 # 6 x (5 + 1) = 36, variable multiplier
-DIFF_CLASSES <- c(0.1, 1, 2) # labels for small move, medium move and large move
+DIFF_CLASSES <- c(0.1) # , 1, 2) # labels for small move, medium move and large move
 ```
 
 ```{r Functions, include=FALSE, results='hide'}
@@ -36,8 +38,9 @@ DIFF_CLASSES <- c(0.1, 1, 2) # labels for small move, medium move and large move
 # --------------------------------------------------------
 # Reading Functions---------------------------------------
 
-master_dataframe <- function(Directory, Files, SkipCols) {
-  path <- paste("./", Directory, "/", sep = "")
+master_dataframe <- function(Files, SkipCols) {
+  parent_path <- substr(getwd(), 1, regexpr("\\/[^\\/]*$", getwd()))
+  path <- paste(parent_path, 'Data/', sep = "")
   dataframes = vector("list", length(Files))
   print(length(dataframes))
   i <- 1
@@ -235,7 +238,7 @@ make_histograms <- function(Data) {
 
 #### Feature and Label Expansion
 ```{r Data Loading and cleaning, results='hide'}
-data <- master_dataframe("Data", DATA_FILES, SKIP_COLUMNS)
+data <- master_dataframe(DATA_FILES, SKIP_COLUMNS)
 features <- data %>%
   diff_dataframe(-1) %>%
   standardise_all_columns() %>%
@@ -342,7 +345,7 @@ grid.arrange(plot2, plot1, ncol=2)
 
 #### Training and Testing Data
 ```{r Training and Testing data}
-inTraining <- createDataPartition(diff[[2]], p = .75, list = FALSE)
+inTraining <- createDataPartition(features[[2]], p = .75, list = FALSE)
 training <- labels %>%
   select(Date, High_SANDP_DiffP1_U1) %>%
   mutate(label = if_else(High_SANDP_DiffP1_U1 == 1, 'GO', 'ST')) %>%
