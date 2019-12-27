@@ -15,8 +15,10 @@ library('RcppRoll')
 library('ggjoy')
 library('gridExtra')
 library('caret')
-library(mlbench)
-library(nnet)
+library('mlbench')
+library('nnet')
+library('rlist')
+library('xgboost')
 set.seed(42)
 ```
 
@@ -26,10 +28,10 @@ set.seed(42)
 # 1 - Retrain: retrain models using the latest data
 # 2 - Prediction: just load data and run predictions using the latest data
 # 3 - Partial Backtest: for debugging, skip the retraining 
-ANALYSIS_MODE = 0
-BACKTEST_DAYS = 5
-MODEL_TRAINING_DAYS = 10
-ENSEMBLE_TRAINING_DAYS = 10
+ANALYSIS_MODE = 1
+BACKTEST_DAYS = 500
+MODEL_TRAINING_DAYS = 500
+ENSEMBLE_TRAINING_DAYS = 500
 
 # Targets and Features
 DATA_FILES <- c('SANDP.csv', 'DJI.csv', 'VIX.csv')
@@ -40,6 +42,8 @@ FEATURE_COLS <- c('SANDP.Open', 'SANDP.High', 'SANDP.Low', 'SANDP.Close', 'DJI.C
 FEATURE_LAGS <- c(0, 1, 1, 1, 1, 1) 
 
 # Feature Engineering
+SHORT_MAS <- c(5, 7, 10, 15)
+LONG_MAS <- c(12, 20, 30, 40)
 AGGREGATE_WINDOWS <- c(5) #, 10, 20) # 3
 AGGREGATE_FUNCTIONS <- c('Mean') #, 'SD') # 3 x 2 = 6
 LAGSTEPS <- 5 # 6 x (5 + 1) = 36, variable multiplier
@@ -52,7 +56,7 @@ VARS_TO_SHOW <-  20
 ```{r Functions, include=FALSE, results='hide'}
 
 # --------------------------------------------------------
-# Reading Functions---------------------------------------
+# Top Level Functions---------------------------------------
 
 master_dataframe <- function(Files, Columns) {
   parent_path <- substr(getwd(), 1, regexpr("\\/[^\\/]*$", getwd()))
@@ -82,25 +86,186 @@ master_dataframe <- function(Files, Columns) {
 }
 
 create_dateranges <- function(Features, Labels) {
-  dates <- Features %>%
+  dates = Features %>%
     merge(Labels, by = "Date", all = FALSE) %>%
     select(Date)
-  dataframes <- list()
-  steps <- c(1)
-  n <- length(dates$Date)
+  dataframes = list()
+  steps = c(1)
+  n = length(dates$Date)
   if (ANALYSIS_MODE == 0 | ANALYSIS_MODE == 3) steps <- c(BACKTEST_DAYS:1)
-  index <- 1
-  print(steps)
+  index = 1
   for (i in steps) {
-    latest_date <- sort(dates$Date,partial=n-i)[n-i]
-    dataframes[index] <- dates %>%
+    latest_date = sort(dates$Date,partial=n-i)[n-i]
+    filtered = dates %>%
       filter(Date <= latest_date) %>%
       arrange(desc(Date)) %>%
       top_n(MODEL_TRAINING_DAYS + ENSEMBLE_TRAINING_DAYS)
-    index <- index + 1
+    dataframes[i] = list(filtered)
+    index = index + 1
   }
   
   return(dataframes)
+}
+
+create_basic_model_data <- function(Dateranges, Features, Labels) {
+  datasets  = list()
+  for (i in 1 : length(Dateranges)) {
+    datasets[i] = Dateranges[[i]] %>%
+                  split_and_process_labels(Features, Labels) %>%
+                  list()
+  }
+  return(datasets)
+}
+
+split_and_process_labels <- function(Dates, Features, Labels) {
+
+  labels =  Labels %>%
+    merge(Dates, by = "Date", all = FALSE) %>%
+    mutate_at(vars(-Date), ~ . - lag(., 1)) %>%
+    drop_na() %>%
+    mutate_at(vars(-Date), scale)
+  
+  names(labels)[-1] = paste(colnames(labels)[-1], 'DIFF1', 'SD', sep = ".")
+   
+  model_features = Features %>% 
+    merge(Dates, by = "Date", all = FALSE) %>%
+    top_n(MODEL_TRAINING_DAYS, Date)
+
+  model_labels = labels %>%
+    top_n(MODEL_TRAINING_DAYS, Date)
+  
+  ensemble_features = Features %>%
+    merge(Dates, by = "Date", all = FALSE) %>%
+    top_n(-ENSEMBLE_TRAINING_DAYS, Date)
+    
+  ensemble_labels = labels %>%
+    top_n(-ENSEMBLE_TRAINING_DAYS, Date)
+  
+  result = list(ensemble_features, 
+                ensemble_labels, 
+                model_features,
+                model_labels)
+  names(result) = c('ensemble_features',
+                    'ensemble_labels',
+                    'model_features',
+                    'model_labels')
+  
+  return(result)
+}
+
+train_or_load_models <- function(Datasets) {
+  model_lists = list()
+  if (ANALYSIS_MODE == 0 | ANALYSIS_MODE == 1) { # train models for each date
+    for (i in 1 : length(Datasets)) {
+      dataset = Datasets[[i]]
+      model_lists[i] = list(train_models(Features = dataset$model_features, 
+                                    Labels = dataset$model_labels))
+      
+    }
+  }
+  return(model_lists)
+}
+
+train_or_load_ensembles <- function(Datasets, Model_Lists) {
+  ensembles = list()
+  if (ANALYSIS_MODE == 0 | ANALYSIS_MODE == 1) { # train models for each date
+    for (i in 1 : length(Datasets)) {
+      dataset = Datasets[[i]]
+      model_list = Model_Lists[[i]]
+      ensembles[i] = list(train_ensemble(Features = dataset$ensemble_features, 
+                                    Labels = dataset$ensemble_labels, 
+                                    Models = model_list))
+    }
+  }
+  return(ensembles)
+}
+
+train_models <- function(Features, Labels) {
+  model_list = list()
+  # moving average crossover models
+  model_list = append(model_list, train_MA_crossover_models(Features, Labels))
+  return(model_list)
+}
+
+train_ensemble <- function(Features, Labels, Models) {
+  ensemble = 'Ensemble_1'
+  return(ensemble)
+}
+
+# ============================================================
+# ============================================================
+# ============================================================
+# ============================================================
+train_MA_crossover_models <- function(Features, Labels) {
+  names(Labels)[2] = "Label"
+  
+  #Preprocessing
+  training = Features %>%
+    generate_MA_crossover_data(SHORT_MAS, LONG_MAS) %>%
+    merge(Labels, by = "Date", all = FALSE) %>%
+    select(-Date)
+  
+  # variable importance tuning grid
+  xgb_grid_1 <- expand.grid(nrounds = 1, eta = 0.3, max_depth = 5, 
+                            gamma = 0, colsample_bytree=1, 
+                            min_child_weight=1, subsample = 1)
+  
+  # variable importance xgboost
+  xgb_tree <-  train(Label ~ ., data = training,
+                    trControl = trainControl(method="none"),
+                    metric="logLoss", tuneGrid = xgb_grid_1, method = "xgbTree")
+  
+  xgbTree_imp <- varImp(xgb_tree, scale = FALSE)
+  ggplot_imp <- ggplot(xgbTree_imp, top = 10)
+  var_list <- xgbTree_imp$importance %>%
+              rownames_to_column(var = "Variable") %>%
+              mutate(Variable = str_replace_all(Variable,"`", "")) %>%
+              filter(Overall > 0.01) %>%
+              top_n(10, Overall)
+  
+  curated_training <- training %>%
+    select(one_of(c(var_list$Variable, 'Label')))
+    
+  model_list = list(ggplot_imp, var_list$Variable, curated_training)
+  
+  return(model_list)
+}
+
+# --------------------------------------------------------
+# MA Crossover Features ----------------------------------
+generate_MA_crossover_data <- function(Data, Short_MAS, Long_MAS) {
+  count = 1
+  for (i in 1 : length(Short_MAS)) {
+    short_MA = Short_MAS[i]
+    for (j in 1 : length(Long_MAS)) {
+      long_MA = Long_MAS[j]
+      if (long_MA > short_MA) {
+        df = single_MA_crossover(Data, short_MA, long_MA)
+        if (count == 1) {
+          master = df
+        } 
+        else {
+          master = merge(master, df, by = "Date", all = FALSE)
+        }
+        count = count + 1
+      }
+    }
+  }
+  return(master)
+}
+
+single_MA_crossover <- function(Data, short_MA, long_MA) {
+  df = Data %>%
+      arrange(Date) %>%
+      mutate_at(vars(-Date), ~ (roll_mean(., short_MA, align = "right", fill = NA)) -
+                (roll_mean(., long_MA, align = "right", fill = NA)))  %>%
+      filter(!is.na(.[[2]])) %>%
+      mutate_at(vars(-Date), scale)
+  prefix = paste('MA', toString(short_MA), '-', 'MA', toString(long_MA), sep = '')
+  
+  names(df)[-1] <- paste(colnames(df)[-1], prefix, sep = ".")
+  
+  return(df)
 }
 
 # --------------------------------------------------------
@@ -132,7 +297,7 @@ diff_dataframe <- function(Data, Offset) {
 }
 
 # At the moment of trading some data won't be available and some will
-runtime_offsets <- function(Data, Columns, Lags = NULL, Leads = NULL) {
+offsets_columns <- function(Data, Columns, Lags = NULL, Leads = NULL) {
   res <- Data %>% select(one_of(c('Date', Columns)))
   
   if (!is.null(Leads)) { #leading somme target columns
@@ -295,17 +460,25 @@ make_histograms <- function(Data) {
 
 ```
 
-#### Feature and Label Expansion
-```{r Data Loading and cleaning, results='hide'}
-data <- master_dataframe(DATA_FILES, c(FEATURE_COLS1, TARGET_COLS))
+#### Data Loading
+```{r Data Loading and cleaning, results = 'hide'}
+master_data <- master_dataframe(DATA_FILES, c(FEATURE_COLS, TARGET_COLS))
 
-features <- data %>%
-  runtime_offsets(Columns = FEATURE_COLS, Lags = FEATURE_LAGS)
+features <- master_data %>% 
+            offsets_columns(Columns = FEATURE_COLS, Lags = FEATURE_LAGS)
 
-labels <- data %>%
-  runtime_offsets(Columns = TARGET_COLS, Leads = TARGET_LEADS)
+labels <- master_data %>% 
+          offsets_columns(Columns = TARGET_COLS, Leads = TARGET_LEADS)
   
-dateranges <- create_dateranges(features, labels)
+datasets <- create_dateranges(features, labels) %>%
+            create_basic_model_data(features, labels)
+
+print(paste('Loaded ', toString(length(datasets)), ' datasets', sep = ""))
+print(paste('Base Features: ', toString(length(datasets[[1]]$model_features)-1), sep = ""))
+print(paste('Base Labels: ', toString(length(datasets[[1]]$model_labels)-1), sep = ""))
+print(paste('Model datapoints: ', toString(length(datasets[[1]]$model_features$Date)), sep = ""))
+print(paste('Ensemble datapoints: ', toString(length(datasets[[1]]$ensemble_features$Date)), sep = ""))
+print(paste('Latest date: ', toString(max(datasets[[1]]$model_features$Date))))
 
 #features <- data %>%
 #  diff_dataframe(-1) %>%
@@ -317,228 +490,13 @@ dateranges <- create_dateranges(features, labels)
 #  diff_dataframe(1) %>%
 #  standardise_all_columns() %>% 
 #  multi_generate_targets(DIFF_CLASSES)
-
 ```
 
-|               | Number of Samples | Features per Sample | Labels per Sample |
-| ------------- |:-------------:| -----:| -----:|
-| Original Samples | `r nrow(data)` | `r ncol(data)` | `r ncol(data)` |
-| Transformed Samples | `r nrow(features)` | `r ncol(features)` | `r ncol(labels)` |
+#### Model Loading
+```{r train or load models, results = 'hide'}
 
-#### Biggest Statistically significant Correlations
-```{r Correlation matrix}
-merged <- features %>%
-  merge(labels, by = "Date") %>%
-  select(-Date) %>%
-  discard(~all(is.na(.x)))
+model_lists <- train_or_load_models(Datasets = datasets)
 
-corr_mat <- cor(merged)
-p_mat <- cor.mtest(merged, conf.level = 0.99)
+ensembles <- train_or_load_ensembles(Datasets = datasets, Model_Lists = model_lists)
 
-corr_df <- data.frame(corr = double(), 
-                      pval = double(), 
-                      i_ind = integer(), 
-                      j_ind = integer(),
-                      i_Name = character(),
-                      j_Name = character())
-for (i in 1 : (ncol(features) - 1)) {
-  for (j in (ncol(features) : ncol(merged))) {
-    corr <- corr_mat[i, j]
-    pval <- p_mat$p[i, j]
-    i_ind <- i
-    j_ind <- j
-    i_Name <- colnames(merged)[i]
-    j_Name <- colnames(merged)[j]
-    corr_df <- rbind(corr_df, data.frame(corr,
-                                         pval, 
-                                         i_ind, 
-                                         j_ind, 
-                                         i_Name,
-                                         j_Name))
-  }
-}
-```
-
-```{r Correlation plot, fig.width=12, fig.height=10}
-x <- corr_df %>%
-  filter(pval<0.01) %>%
-  group_by(i_ind) %>%
-  summarise(corr = max(corr)) %>%
-  arrange(desc(abs(corr))) %>%
-  top_n(VARS_TO_SHOW) %>%
-  distinct(i_ind) %>%
-  pull(i_ind)
-y <- corr_df %>%
-  filter(pval<0.01) %>%
-  group_by(j_ind) %>%
-  summarise(corr = max(corr)) %>%
-  arrange(desc(abs(corr))) %>%
-  top_n(VARS_TO_SHOW) %>%
-  distinct(j_ind) %>%
-  pull(j_ind)
-
-#Correlation plot of top
-corrplot(corr_mat[x, y], tl.cex = 1)
-```
-
-#### Statistically significant (p-value < 0.01) Correlations for target variables
-```{r Correlation distributions, fig.width=12}
-# box plot for 
-plot1 <- corr_df %>%
-  filter(pval<0.01) %>%
-  mutate(j_Name = reorder(j_Name, corr**2, sum)) %>%
-  ggplot() +
-  aes(x = corr**2, y = j_Name, fill = j_Name) +
-  geom_joy() + 
-  ylab('') + 
-  xlab('Squared Correlation Distribution') +
-  theme(legend.position = "none",
-        axis.text.y = element_blank())
-
-plot2 <- corr_df %>%
-  filter(pval<0.01 )%>%
-  group_by(j_Name) %>%
-  summarise(sum_corr_squared = sum(corr**2)) %>%
-  ggplot() +
-  aes(x = reorder(j_Name, sum_corr_squared), y = sum_corr_squared, fill = sum_corr_squared) +
-  geom_bar(stat="identity") +
-  coord_flip() + 
-  xlab('') +
-  ylab('Sum of Squared Correlation') + 
-  theme(axis.text.y = element_text(size = 12),
-        legend.position = "none")
-
-grid.arrange(plot2, plot1, ncol=2)
-```
-
-#### Training and Testing Data
-```{r Training and Testing data}
-inTraining <- createDataPartition(features[[2]], p = .75, list = FALSE)
-training <- labels %>%
-  select(Date, High_SANDP_DiffP1_U1) %>%
-  mutate(label = if_else(High_SANDP_DiffP1_U1 == 1, 'GO', 'ST')) %>%
-  merge(diff[inTraining, ], by = "Date", all = FALSE) %>%
-  select(-Date, -High_SANDP_DiffP1_U1)
-
-testing <- labels %>%
-  select(Date, High_SANDP_DiffP1_U1) %>%
-  mutate(label = if_else(High_SANDP_DiffP1_U1 == 1, 'GO', 'ST')) %>%
-  merge(diff[-inTraining, ], by = "Date", all = FALSE) %>%
-  select(-Date, -High_SANDP_DiffP1_U1)
-
-## 3-fold CV with 10 repetitions
-fitControl <- trainControl(
-  method = "repeatedcv",
-  number = 3,
-  repeats = 3)
-
-# baselines
-n_zeros <- training %>% filter(label=='ST') %>% nrow()
-n_ones <- training %>% filter(label=='GO') %>% nrow()
-n_tot <- training %>% nrow()
-
-just_stays <- training %>%
-  filter(label == 'ST') %>%
-  top_n(n_ones, .[[2]]) 
-
-training_bal <- training %>%
-  filter(label == 'GO') %>%
-  rbind(just_stays)
-
-print(paste('Training set size: ', toString(nrow(training))))
-print(paste('All zeros baseline accuracy: ', toString(n_zeros/n_tot)))
-
-print(paste('Balanced Training set size: ', toString(nrow(training_bal))))
-print('All zeros baseline accuracy: 0.5')
-```
-
-|               | Number of Samples | All Zeros Baseline |
-| ------------- |:-------------:| -----:|
-| Training Set | `r nrow(training)` | `r n_zeros/n_tot` |
-| Balanced Training Set | `r nrow(training_bal)` | 0.5 |
-
-``` {r pearson's correlation Variable search, fig.height = 6, fig.width=12}
-cor <- training %>%
-  select(label) %>%
-  mutate(label = if_else(label == "GO", 1, 0)) %>%
-  as.matrix() %>%
-  cor(as.matrix(select(training, -label)))
-
-cor_bal <- training_bal %>%
-  select(label) %>%
-  mutate(label = if_else(label == "GO", 1, 0)) %>%
-  as.matrix() %>%
-  cor(as.matrix(select(training_bal, -label)))
-```
-
-``` {r xgradientboost tree variable search, fig.height = 6, fig.width=12}
-xgbTree <- train(label ~ ., data = training, 
-                 method = "xgbTree")
-gbmImp <- varImp(xgbTree, scale = FALSE)
-
-xgbTree_bal <- train(label ~ ., data = training_bal, 
-                 method = "xgbTree")
-gbmImp_bal <- varImp(xgbTree_bal, scale = FALSE)
-```
-
-``` {r variable search graphs, fig.width=12}
-plot1 <- data.frame(data = colnames(cor), abs_corr = abs(cor[1,])) %>%
-  top_n(20, abs_corr) %>%
-  ggplot() +
-  aes(x = reorder(data, abs_corr), y = abs_corr) +
-  geom_bar(stat="identity") +
-  xlab('')+
-  coord_flip()
-
-plot2 <- data.frame(data = colnames(cor_bal), abs_corr = abs(cor_bal[1,])) %>%
-  top_n(20, abs_corr) %>%
-  ggplot() +
-  aes(x = reorder(data, abs_corr), y = abs_corr) +
-  geom_bar(stat="identity") +
-  xlab('')+
-  coord_flip()
-
-plot3 <- ggplot(gbmImp, top = 20) + xlab('')
-plot4 <- ggplot(gbmImp_bal, top = 20) + xlab('')
-grid.arrange(plot1, plot2, plot3, plot4, nrow=2,ncol=2)
-```
-
-``` {r Linear Model}
-gbmGrid1 <- expand.grid(interaction.depth = c(1,5,9), n.trees = (1:30)*50, shrinkage = 0.1, n.minobsinnode=20)
-
-gbmFit1 <- train(label ~ ., data = training, method = "gbm", trControl = fitControl,
-                 verbose = FALSE, tuneGrid = gbmGrid1, metric = "Kappa")
-gbmFit1_bal <- train(label ~ ., data = training_bal, method = "gbm", trControl = fitControl, 
-                     verbose = FALSE, tuneGrid = gbmGrid1)
-```
-
-``` {r K Nearest Neighbours}
-gbmGrid2 <- expand.grid(k= (3:20))
-gbmFit2 <- train(label ~ ., data = training, method = "knn", metric = "Kappa",
-                 trControl = fitControl, tuneGrid = gbmGrid2)
-gbmFit2_bal <- train(label ~ ., data = training_bal, method = "knn", 
-                     trControl = fitControl, tuneGrid = gbmGrid2)
-```
-
-```{r neural network model}
-gbmGrid3 <- expand.grid(size= (5:10), decay = c(1.0e-3, 1.0e-2, 1.0e-1))
-gbmFit3 <- train(label ~ ., data = training, method = "nnet", metric = "Kappa",
-                 trControl = fitControl, tuneGrid = gbmGrid3)
-gbmFit3_bal <- train(label ~ ., data = training_bal, method = "nnet",
-                 trControl = fitControl, tuneGrid = gbmGrid3)
-```
-
-#### Cross validated model params and accuracies
-``` {r model plots, fig.width = 12, fig.height = 12}
-
-plot1 <- plot(gbmFit1, metrick = "Kappa")
-plot2 <- plot(gbmFit1_bal, metrick = "Kappa")
-
-plot3 <- plot(gbmFit2, metric = "Kappa")
-plot4 <- plot(gbmFit2_bal, metric = "Kappa")
-
-plot5 <- plot(gbmFit3, metric="Kappa")
-plot6 <- plot(gbmFit3_bal, metric="Kappa")
-
-grid.arrange(plot1, plot2, plot3, plot4, plot5, plot6, nrow = 3, ncol = 2)
 ```
