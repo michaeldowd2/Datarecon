@@ -107,87 +107,69 @@ create_dateranges <- function(Features, Labels) {
   return(dataframes)
 }
 
-create_basic_model_data <- function(Dateranges, Features, Labels) {
-  datasets  = list()
-  for (i in 1 : length(Dateranges)) {
-    datasets[i] = Dateranges[[i]] %>%
-                  split_and_process_labels(Features, Labels) %>%
-                  list()
-  }
-  return(datasets)
-}
-
-split_and_process_labels <- function(Dates, Features, Labels) {
-
-  labels =  Labels %>%
+extract_training_data <- function(Dates, Features, Labels, Mode = 'MODEL') {
+  labels <-  Labels %>%
     merge(Dates, by = "Date", all = FALSE) %>%
     mutate_at(vars(-Date), ~ . - lag(., 1)) %>%
-    drop_na() %>%
-    mutate_at(vars(-Date), scale)
+    drop_na()
   
-  names(labels)[-1] = paste(colnames(labels)[-1], 'DIFF1', 'SD', sep = ".")
+  names(labels)[-1] <- paste(colnames(labels)[-1], 'DIFF1', sep = ".")
+  
+  extract_amount <- MODEL_TRAINING_DAYS
+  if (Mode == 'ENSEMBLE') extract_amount <- -ENSEMBLE_TRAINING_DAYS
    
-  model_features = Features %>% 
+  features <- Features %>% 
     merge(Dates, by = "Date", all = FALSE) %>%
-    top_n(MODEL_TRAINING_DAYS, Date)
+    top_n(extract_amount, Date)
 
-  model_labels = labels %>%
-    top_n(MODEL_TRAINING_DAYS, Date)
-  
-  ensemble_features = Features %>%
-    merge(Dates, by = "Date", all = FALSE) %>%
-    top_n(-ENSEMBLE_TRAINING_DAYS, Date)
-    
-  ensemble_labels = labels %>%
-    top_n(-ENSEMBLE_TRAINING_DAYS, Date)
-  
-  result = list(ensemble_features, 
-                ensemble_labels, 
-                model_features,
-                model_labels)
-  names(result) = c('ensemble_features',
-                    'ensemble_labels',
-                    'model_features',
-                    'model_labels')
-  
+  labels <- labels %>%
+    top_n(extract_amount, Date)
+
+  result <- list(features,
+                labels)
+  names(result) <- c('Features',
+                    'Labels')
   return(result)
 }
 
-train_or_load_models <- function(Datasets) {
+train_or_load_models <- function(Dateranges, Features, Labels) {
   model_lists = list()
   if (ANALYSIS_MODE == 0 | ANALYSIS_MODE == 1) { # train models for each date
-    for (i in 1 : length(Datasets)) {
-      dataset = Datasets[[i]]
-      model_lists[i] = list(train_models(Features = dataset$model_features, 
-                                    Labels = dataset$model_labels))
-      
+    for (i in 1 : length(Dateranges)) {
+      daterange = Dateranges[[i]]
+      model_lists[i] = extract_training_data(daterange, Features, Labels, Mode = 'MODEL') %>%
+                        train_models() %>%
+                        list()
     }
   }
   return(model_lists)
 }
 
-train_or_load_ensembles <- function(Datasets, Model_Lists) {
+train_or_load_ensembles <- function(Dateranges, Features, Labels, Model_Lists) {
   ensembles = list()
   if (ANALYSIS_MODE == 0 | ANALYSIS_MODE == 1) { # train models for each date
-    for (i in 1 : length(Datasets)) {
-      dataset = Datasets[[i]]
+    for (i in 1 : length(Dateranges)) {
+      daterange = Dateranges[[i]]
       model_list = Model_Lists[[i]]
-      ensembles[i] = list(train_ensemble(Features = dataset$ensemble_features, 
-                                    Labels = dataset$ensemble_labels, 
-                                    Models = model_list))
+      ensembles[i] = extract_training_data(daterange, Features, Labels, Mode = 'ENSEMBLE') %>%
+                        train_ensemble(model_list) %>%
+                        list()
     }
   }
   return(ensembles)
 }
 
-train_models <- function(Features, Labels) {
-  model_list = list()
-  # moving average crossover models
-  model_list = append(model_list, train_MA_crossover_models(Features, Labels))
+train_models <- function(Dataset) {
+  
+  ma_crossover <- train_MA_crossover_model(Dataset$Features, Dataset$Labels)
+  exponential_ma <- 'Exponential MA Model'
+  
+  model_list <- list(ma_crossover, exponential_ma)
+  names(model_list) <- c('ma_crossover', 'exponential_ma')
   return(model_list)
 }
 
-train_ensemble <- function(Features, Labels, Models) {
+train_ensemble <- function(Dataset, Models) {
   ensemble = 'Ensemble_1'
   return(ensemble)
 }
@@ -196,7 +178,7 @@ train_ensemble <- function(Features, Labels, Models) {
 # ============================================================
 # ============================================================
 # ============================================================
-train_MA_crossover_models <- function(Features, Labels) {
+train_MA_crossover_model <- function(Features, Labels) {
   names(Labels)[2] = "Label"
   
   #Preprocessing
@@ -226,9 +208,14 @@ train_MA_crossover_models <- function(Features, Labels) {
   curated_training <- training %>%
     select(one_of(c(var_list$Variable, 'Label')))
     
-  model_list = list(ggplot_imp, var_list$Variable, curated_training)
+  model_properties = list(ggplot_imp, 
+                          var_list$Variable, 
+                          curated_training)
+  names(model_properties) = c('Feature_Importance_Plot', 
+                              'Chosen_Features_Vector',
+                              'Curated_Training_Set')
   
-  return(model_list)
+  return(model_properties)
 }
 
 # --------------------------------------------------------
@@ -470,33 +457,17 @@ features <- master_data %>%
 labels <- master_data %>% 
           offsets_columns(Columns = TARGET_COLS, Leads = TARGET_LEADS)
   
-datasets <- create_dateranges(features, labels) %>%
-            create_basic_model_data(features, labels)
+dateranges <- create_dateranges(features, labels)
 
-print(paste('Loaded ', toString(length(datasets)), ' datasets', sep = ""))
-print(paste('Base Features: ', toString(length(datasets[[1]]$model_features)-1), sep = ""))
-print(paste('Base Labels: ', toString(length(datasets[[1]]$model_labels)-1), sep = ""))
-print(paste('Model datapoints: ', toString(length(datasets[[1]]$model_features$Date)), sep = ""))
-print(paste('Ensemble datapoints: ', toString(length(datasets[[1]]$ensemble_features$Date)), sep = ""))
-print(paste('Latest date: ', toString(max(datasets[[1]]$model_features$Date))))
-
-#features <- data %>%
-#  diff_dataframe(-1) %>%
-#  standardise_all_columns() %>%
-#  multi_window_and_lagsteps(AGGREGATE_WINDOWS, LAGSTEPS, AGGREGATE_FUNCTIONS) %>%
-#  dates_dataframe()
-
-#labels <- data %>% 
-#  diff_dataframe(1) %>%
-#  standardise_all_columns() %>% 
-#  multi_generate_targets(DIFF_CLASSES)
 ```
 
 #### Model Loading
 ```{r train or load models, results = 'hide'}
 
-model_lists <- train_or_load_models(Datasets = datasets)
+model_lists <- train_or_load_models(dateranges, features, labels)
 
-ensembles <- train_or_load_ensembles(Datasets = datasets, Model_Lists = model_lists)
+#model_lists <- train_or_load_models(Datasets = datasets)
+
+#ensembles <- train_or_load_ensembles(Datasets = datasets, Model_Lists = model_lists)
 
 ```
