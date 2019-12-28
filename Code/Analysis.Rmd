@@ -1,0 +1,105 @@
+---
+title: "Short S & P Analysis"
+date: "12/4/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE, results="hide"}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library('tidyverse')
+library('lubridate')
+library('reshape2')
+library('corrplot')
+library('RcppRoll')
+library('ggjoy')
+library('gridExtra')
+library('caret')
+library('mlbench')
+library('nnet')
+library('rlist')
+library('xgboost')
+
+source('DataHelpers.R')
+source('ModelHelpers.R')
+source('ChartHelpers.R')
+source('FeatureEngineering.R')
+set.seed(42)
+```
+
+```{r Global Variables, include=FALSE, results='hide'}
+DEBUG = 1
+
+# Analysis Mode
+# 0 - Full Backtest: run over a over historic days with retraining after every day
+# 1 - Retrain: retrain models using the latest data -1 date (current close, max and min will be incorrect)
+# 2 - Prediction: just load data and run predictions using the latest data
+ANALYSIS_MODE = 1
+BACKTEST_DAYS = 500
+MODEL_TRAINING_DAYS = 500
+ENSEMBLE_TRAINING_DAYS = 500
+
+# Targets and Features
+DATA_FILES <- c('SANDP.csv', 'DJI.csv', 'VIX.csv')
+TARGET_COLS <- c('SANDP.Close')
+TARGET_LEADS <- c(0) 
+TARGET_DIFFS <- c(-0.1, -0.7) # std diff
+FEATURE_COLS <- c('SANDP.Open', 'SANDP.High', 'SANDP.Low', 'SANDP.Close', 'DJI.Close', 'VIX.Close')
+FEATURE_LAGS <- c(0, 1, 1, 1, 1, 1) 
+
+# Feature Engineering
+SHORT_MAS <- c(5, 7, 10, 15)
+LONG_MAS <- c(12, 20, 30, 40)
+AGGREGATE_WINDOWS <- c(5) #, 10, 20) # 3
+AGGREGATE_FUNCTIONS <- c('Mean') #, 'SD') # 3 x 2 = 6
+LAGSTEPS <- 5 # 6 x (5 + 1) = 36, variable multiplier
+DIFF_CLASSES <- c(0.1) # , 1, 2) # labels for small move, medium move and large move
+
+```
+
+#### Data Loading
+```{r Data Loading, results = "hide"}
+master_data <- create_master_dataframe(DATA_FILES, c(FEATURE_COLS, TARGET_COLS))
+```
+
+* Files Loaded:  `r length(DATA_FILES)`
+* Latest matched date: `r max(master_data$Date)`
+* Earliest matched date: `r min(master_data$Date)`
+* Total data points: `r length(master_data$Date)`
+
+----
+
+#### Offset Features and Labels
+```{r Offsetting, results = 'hide'}
+features <- master_data %>% 
+            offset_columns(Columns = FEATURE_COLS, Lags = FEATURE_LAGS)
+
+labels <- master_data %>% 
+          offset_columns(Columns = TARGET_COLS, Leads = TARGET_LEADS)
+
+dateranges <- create_dateranges(features, labels, ANALYSIS_MODE, BACKTEST_DAYS, MODEL_TRAINING_DAYS, ENSEMBLE_TRAINING_DAYS)
+```
+
+* Number of base features:  `r length(features)`
+* Number of base labels:  `r length(labels)`
+* Offetting:  `r sum(FEATURE_LAGS)` / `r length(FEATURE_LAGS)` columns
+
+----
+
+#### Feature Expansion and Predictor Modelling
+```{r train or load models, fig.width = 12, fig.height = 4}
+
+model_lists <- train_or_load_models(dateranges, features, labels, MODEL_TRAINING_DAYS)
+
+grid.arrange(model_lists[[1]]$ma_crossover$Feature_Importance_Plot, 
+             model_lists[[1]]$dates$Feature_Importance_Plot, 
+             nrow=1,ncol=2)
+```
+
+----
+
+#### Ensemble Modelling
+```{r train or load ensembles, fig.width = 12, fig.height = 4}
+
+ensembles <- train_or_load_ensembles(dateranges, features, labels, model_lists, ENSEMBLE_TRAINING_DAYS)
+
+```
