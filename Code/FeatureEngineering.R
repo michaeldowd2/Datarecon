@@ -27,7 +27,7 @@ single_MA_crossover <- function(Data, short_MA, long_MA) {
     mutate_at(vars(-Date), ~ (roll_mean(., short_MA, align = "right", fill = NA)) -
                 (roll_mean(., long_MA, align = "right", fill = NA)))  %>%
     filter(!is.na(.[[2]]))
-  prefix = paste('MA', toString(short_MA), '-', 'MA', toString(long_MA), sep = '')
+  prefix = paste('MA', toString(short_MA), '_', 'MA', toString(long_MA), sep = '')
   
   names(df)[-1] <- paste(colnames(df)[-1], prefix, sep = ".")
   

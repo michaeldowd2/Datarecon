@@ -38,32 +38,22 @@ train_models <- function(Dataset) {
 train_model <- function(Features, Labels, Feature_Function) {
   names(Labels)[2] <- "Label"
   
-  engineered_training = Features %>%
-                        Feature_Function() %>%
+  engineered_training = Features %>% Feature_Function() %>%
                         merge(Labels, by = "Date", all = FALSE)
   
-  training <- engineered_training %>%
-              select(-Date) %>%
-              scale() # all numeric features and labels are standardised
-              
-  # variable importance tuning grid
-  xgb_grid_1 <- expand.grid(nrounds = 1, eta = 0.3, max_depth = 5, 
-                            gamma = 0, colsample_bytree=1, 
-                            min_child_weight=1, subsample = 1)
+  # the scaling factors will be used on new data and out of training data
+  scaling_means <- engineered_training %>% summarise_at(vars(-Date), mean)
+  scaling_sds <- engineered_training %>% summarise_at(vars(-Date), sd)
+
+  training <- engineered_training %>% select(-Date) %>%
+              standardise(scaling_means, scaling_sds)
   
-  # variable importance with xgboost tree
-  xgb_tree <-  train(Label ~ ., data = training,
-                     trControl = trainControl(method="none"),
-                     metric="logLoss", tuneGrid = xgb_grid_1, method = "xgbTree")
-  
-  xgbTree_imp <- varImp(xgb_tree, scale = FALSE)
+  xgbTree_imp <- xgb_tree_importance(training)
   ggplot_imp <- ggplot(xgbTree_imp, top = 10)
   
-  var_list <- xgbTree_imp$importance %>%
-    rownames_to_column(var = "Variable") %>%
-    mutate(Variable = str_replace_all(Variable,"`", "")) %>%
-    filter(Overall > 0.01) %>%
-    top_n(10, Overall)
+  var_list <- xgbTree_imp$importance %>% rownames_to_column(var = "Variable") %>%
+              mutate(Variable = str_replace_all(Variable,"`", "")) %>%
+              filter(Overall > 0.01) %>% top_n(10, Overall)
   
   # Include the generated in the output if in Debug
   curated_training <- 'ENABLE DEBUG'
@@ -72,28 +62,46 @@ train_model <- function(Features, Labels, Feature_Function) {
                         select(one_of(c('Date', var_list$Variable, 'Label')))
   }
   
-  # the scaling factors will be used on new data and out of training data
-  scaling_means <- engineered_training %>%
-                   summarise_at(vars(-Date), mean)
-  scaling_sd <- engineered_training %>%
-                summarise_at(vars(-Date), sd)
-  
   # Return the model and other properties
   model_properties = list(as.character(substitute(Feature_Function)),
                           ggplot_imp, 
-                          var_list$Variable, 
+                          var_list$Variable,
                           curated_training,
                           scaling_means,
-                          scaling_sd)
+                          scaling_sds)
   
   names(model_properties) = c('Feature_Function',
                               'Feature_Importance_Plot', 
                               'Chosen_Features_Vector',
                               'Curated_Training_Set',
                               'scaling_means',
-                              'scaling_sd')
+                              'scaling_sds')
   
   return(model_properties)
+}
+
+xgb_tree_importance <- function(Training_Data) {
+  xgb_grid_1 <- expand.grid(nrounds = 1, eta = 0.3, max_depth = 5, 
+                            gamma = 0, colsample_bytree=1, 
+                            min_child_weight=1, subsample = 1)
+  
+  xgb_tree <-  train(Label ~ ., data = Training_Data,
+                     trControl = trainControl(method="none"),
+                     metric="logLoss", tuneGrid = xgb_grid_1, method = "xgbTree")
+  
+  return(varImp(xgb_tree, scale = FALSE))
+}
+
+standardise <- function(Dataset, Means, SDs) {
+  res <- data.frame(mapply('-', Dataset, Means, SIMPLIFY = FALSE))
+  res <- data.frame(mapply('/', res, SDs, SIMPLIFY = FALSE))
+  return(res)
+}
+
+de_standardise <- function(Dataset, Means, SDs) {
+  res <- data.frame(mapply('*', res, SDs, SIMPLIFY = FALSE))
+  res <- data.frame(mapply('+', Dataset, Means, SIMPLIFY = FALSE))
+  return(res)
 }
 
 train_ensemble <- function(Dataset, Models) {
