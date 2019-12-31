@@ -3,11 +3,13 @@ title: "Short S & P Analysis"
 date: "12/4/2019"
 output: html_document
 params: 
-  TARGET_COLS_PARAM: 'SANDP.Close'
-  FEATURE_COLS_PARAM: 'SANDP.Open,SANDP.High,SANDP.Low,SANDP.Close,DJI.Close,VIX.Close'
+  TARGET_COLS_PAR: [SANDP.Close]
+  FEATURE_COLS_PAR: [SANDP.Open,SANDP.High,SANDP.Low,SANDP.Close,DJI.Close,VIX.Close]
+  SHORT_MAS_PAR: [5,7,10,15]
+  ENSEMBLE_TRAINING_DAYS_PAR: 500
 ---
 
-```{r setup, include=FALSE, results="hide"}
+```{r setup_analyisis, include=FALSE, results="hide"}
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 library('tidyverse')
 library('lubridate')
@@ -39,20 +41,21 @@ DEBUG = 1
 ANALYSIS_MODE = 1
 BACKTEST_DAYS = 500
 MODEL_TRAINING_DAYS = 500
-ENSEMBLE_TRAINING_DAYS = 500
+ENSEMBLE_TRAINING_DAYS = params$ENSEMBLE_TRAINING_DAYS_PAR # 500
 
 # Targets and Features
 DATA_FILES <- c('SANDP.csv', 'DJI.csv', 'VIX.csv')
 #TARGET_COLS <- c('SANDP.Close')
-TARGET_COLS <- unlist(strsplit(params$TARGET_COLS_PARAM, ","))
+TARGET_COLS <- params$TARGET_COLS_PAR 
+print(TARGET_COLS)
 TARGET_LEADS <- c(0) 
 TARGET_DIFFS <- c(-0.1, -0.7) # std diff
 #FEATURE_COLS <- c('SANDP.Open', 'SANDP.High', 'SANDP.Low', 'SANDP.Close', 'DJI.Close', 'VIX.Close')
-FEATURE_COLS <- unlist(strsplit(params$FEATURE_COLS_PARAM, ","))
+FEATURE_COLS <- params$FEATURE_COLS_PAR
 FEATURE_LAGS <- c(0, 1, 1, 1, 1, 1) 
 
 # Feature Engineering
-SHORT_MAS <- c(5, 7, 10, 15)
+SHORT_MAS <- params$SHORT_MAS_PAR #c(5, 7, 10, 15)
 LONG_MAS <- c(12, 20, 30, 40)
 AGGREGATE_WINDOWS <- c(5) #, 10, 20) # 3
 AGGREGATE_FUNCTIONS <- c('Mean') #, 'SD') # 3 x 2 = 6
@@ -63,7 +66,7 @@ print(TARGET_COLS)
 ```
 
 #### Data Loading
-```{r Data Loading, results = "hide"}
+```{r Data Loading_analysis, results = "hide"}
 master_data <- create_master_dataframe(DATA_FILES, c(FEATURE_COLS, TARGET_COLS))
 ```
 

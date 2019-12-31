@@ -5,18 +5,37 @@ date: "12/26/2019"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup_main, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library('yaml')
+source('DataHelpers.R')
 ```
 
 ## Data downlaod
-
 
 |               | Start | Finish |
 | ------------- |:-------------:|:-------------:|
 | Data Downlaod | X | Y |
 
 ## Live analysis predictions
+``` {r run analyses predictions, results = 'hide'}
+
+#1 get all analyses
+par_path <- parent_path()
+analyses <-  list.dirs(path = paste(par_path, "./Output/", sep =""), full.names = TRUE, recursive = FALSE)
+for (analysis in analyses) {
+  
+  # parameters
+  paras <-  read_yaml(paste(analysis, 'parameters.yml', sep = '/'))
+  
+  # Add parameter for running in prediction mode
+  # paras.append(Mode = 2)
+  
+  # render
+  rmarkdown::render(input = 'Analysis.rmd', output_dir = analysis, params = paras)
+}
+
+```
 
 
 |               | Start | Finish |

@@ -1,11 +1,10 @@
 <!DOCTYPE html>
 
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html>
 
 <head>
 
 <meta charset="utf-8" />
-<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 <meta name="generator" content="pandoc" />
 <meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
 
@@ -332,6 +331,7 @@ summary {
   border: none;
   display: inline-block;
   border-radius: 4px;
+  background-color: transparent;
 }
 
 .tabset-dropdown > .nav-tabs.nav-tabs-open > li {
@@ -391,6 +391,64 @@ summary {
 </div>
 <div id="live-analysis-predictions" class="section level2">
 <h2>Live analysis predictions</h2>
+<pre class="r"><code>#1 get all analyses
+par_path &lt;- parent_path()
+analyses &lt;-  list.dirs(path = paste(par_path, &quot;./Output/&quot;, sep =&quot;&quot;), full.names = TRUE, recursive = FALSE)
+for (analysis in analyses) {
+  
+  # parameters
+  paras &lt;-  read_yaml(paste(analysis, &#39;parameters.yml&#39;, sep = &#39;/&#39;))
+  
+  # Add parameter for running in prediction mode
+  # paras.append(Mode = 2)
+  
+  # render
+  rmarkdown::render(input = &#39;Analysis.rmd&#39;, output_dir = analysis, params = paras)
+}</code></pre>
+<pre><code>## 
+## 
+## processing file: Analysis.rmd</code></pre>
+<pre><code>## Parsed with column specification:
+## cols(
+##   Date = col_date(format = &quot;&quot;),
+##   Open = col_double(),
+##   High = col_double(),
+##   Low = col_double(),
+##   Close = col_double(),
+##   `Adj Close` = col_double(),
+##   Volume = col_double()
+## )</code></pre>
+<pre><code>## Warning: Unknown columns: `DJI.Close`, `VIX.Close`</code></pre>
+<pre><code>## Parsed with column specification:
+## cols(
+##   Date = col_date(format = &quot;&quot;),
+##   Open = col_double(),
+##   High = col_double(),
+##   Low = col_double(),
+##   Close = col_double(),
+##   `Adj Close` = col_double(),
+##   Volume = col_double()
+## )</code></pre>
+<pre><code>## Warning: Unknown columns: `SANDP.Open`, `SANDP.High`,
+## `SANDP.Low`, `SANDP.Close`, `VIX.Close`</code></pre>
+<pre><code>## Parsed with column specification:
+## cols(
+##   Date = col_date(format = &quot;&quot;),
+##   Open = col_double(),
+##   High = col_double(),
+##   Low = col_double(),
+##   Close = col_double(),
+##   `Adj Close` = col_double(),
+##   Volume = col_double()
+## )</code></pre>
+<pre><code>## Warning: Unknown columns: `SANDP.Open`, `SANDP.High`,
+## `SANDP.Low`, `SANDP.Close`, `DJI.Close`</code></pre>
+<pre><code>## Selecting by Date</code></pre>
+<pre><code>## Warning: Removed 7 rows containing missing values
+## (position_stack).</code></pre>
+<pre><code>## output file: Analysis.knit.md</code></pre>
+<pre><code>## 
+## Output created: D:/git/Datarecon/Output/Short S and P_Analysis/Analysis.html</code></pre>
 <table>
 <thead>
 <tr class="header">
@@ -420,7 +478,7 @@ summary {
 </thead>
 <tbody>
 <tr class="odd">
-<td>Analysis Predictions</td>
+<td>Analysis rerun</td>
 <td align="center">X</td>
 <td align="center">Y</td>
 </tr>
