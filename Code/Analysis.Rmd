@@ -2,6 +2,9 @@
 title: "Short S & P Analysis"
 date: "12/4/2019"
 output: html_document
+params: 
+  TARGET_COLS_PARAM: 'SANDP.Close'
+  FEATURE_COLS_PARAM: 'SANDP.Open,SANDP.High,SANDP.Low,SANDP.Close,DJI.Close,VIX.Close'
 ---
 
 ```{r setup, include=FALSE, results="hide"}
@@ -40,10 +43,12 @@ ENSEMBLE_TRAINING_DAYS = 500
 
 # Targets and Features
 DATA_FILES <- c('SANDP.csv', 'DJI.csv', 'VIX.csv')
-TARGET_COLS <- c('SANDP.Close')
+#TARGET_COLS <- c('SANDP.Close')
+TARGET_COLS <- unlist(strsplit(params$TARGET_COLS_PARAM, ","))
 TARGET_LEADS <- c(0) 
 TARGET_DIFFS <- c(-0.1, -0.7) # std diff
-FEATURE_COLS <- c('SANDP.Open', 'SANDP.High', 'SANDP.Low', 'SANDP.Close', 'DJI.Close', 'VIX.Close')
+#FEATURE_COLS <- c('SANDP.Open', 'SANDP.High', 'SANDP.Low', 'SANDP.Close', 'DJI.Close', 'VIX.Close')
+FEATURE_COLS <- unlist(strsplit(params$FEATURE_COLS_PARAM, ","))
 FEATURE_LAGS <- c(0, 1, 1, 1, 1, 1) 
 
 # Feature Engineering
@@ -54,6 +59,7 @@ AGGREGATE_FUNCTIONS <- c('Mean') #, 'SD') # 3 x 2 = 6
 LAGSTEPS <- 5 # 6 x (5 + 1) = 36, variable multiplier
 DIFF_CLASSES <- c(0.1) # , 1, 2) # labels for small move, medium move and large move
 
+print(TARGET_COLS)
 ```
 
 #### Data Loading

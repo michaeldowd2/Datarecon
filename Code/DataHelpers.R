@@ -1,4 +1,14 @@
 # --------------------------------------------------------
+# Load parameters file to list----------------------------
+load_parameters_to_list <- function(Filename) {
+  x <- scan(Filename, what="", sep="\n")
+  y <- strsplit(x, ":")
+  names(y) <- sapply(y, `[[`, 1)
+  y <- lapply(y, `[`, -1)
+  return(y)
+}
+
+# --------------------------------------------------------
 # Load files to dataframe---------------------------------
 create_master_dataframe <- function(Files, Columns) {
   parent_path <- substr(getwd(), 1, regexpr("\\/[^\\/]*$", getwd()))
