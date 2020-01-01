@@ -55,12 +55,17 @@ train_model <- function(Features, Labels, Feature_Function) {
               mutate(Variable = str_replace_all(Variable,"`", "")) %>%
               filter(Overall > 0.01) %>% top_n(10, Overall)
   
-  # Include the generated in the output if in Debug
-  curated_training <- 'ENABLE DEBUG'
-  if (DEBUG == 1) {
-    curated_training <- engineered_training %>%
-                        select(one_of(c('Date', var_list$Variable, 'Label')))
-  }
+  curated_training <- training %>%
+                      select(one_of(c(var_list$Variable, 'Label')))
+  
+  nn_model <- caret_model(curated_training, "nnet", expand.grid(size = (5:10), decay = c(1.0e-3, 1.0e-2, 1.0e-1)))
+  ggplot_nn_model <- plot(nn_model)
+  
+  knn_model <- caret_model(curated_training, "kknn", expand.grid(kmax = seq(4, 20, by = 2), kernel = c('rectangular', 'gaussian', 'optimal'), distance = 2))
+  ggplot_knn_model <- plot(knn_model)
+  
+  linear_model <- caret_model(curated_training, "gbm", expand.grid(interaction.depth = c(1,5,9), n.trees = (1:30)*50, shrinkage = 0.1, n.minobsinnode=20))
+  ggplot_linear_model <- plot(linear_model)
   
   # Return the model and other properties
   model_properties = list(as.character(substitute(Feature_Function)),
@@ -68,28 +73,66 @@ train_model <- function(Features, Labels, Feature_Function) {
                           var_list$Variable,
                           curated_training,
                           scaling_means,
-                          scaling_sds)
+                          scaling_sds,
+                          nn_model,
+                          ggplot_nn_model,
+                          knn_model,
+                          ggplot_knn_model,
+                          linear_model,
+                          ggplot_linear_model)
   
   names(model_properties) = c('Feature_Function',
                               'Feature_Importance_Plot', 
                               'Chosen_Features_Vector',
                               'Curated_Training_Set',
                               'scaling_means',
-                              'scaling_sds')
+                              'scaling_sds',
+                              'nn_model',
+                              'nn_model_plot',
+                              'knn_model',
+                              'knn_model_plot',
+                              'linear_model',
+                              'linear_model_plot')
   
   return(model_properties)
 }
 
 xgb_tree_importance <- function(Training_Data) {
-  xgb_grid_1 <- expand.grid(nrounds = 1, eta = 0.3, max_depth = 5, 
+  parameter_grid <- expand.grid(nrounds = 1, eta = 0.3, max_depth = 5, 
                             gamma = 0, colsample_bytree=1, 
                             min_child_weight=1, subsample = 1)
   
-  xgb_tree <-  train(Label ~ ., data = Training_Data,
-                     trControl = trainControl(method="none"),
-                     metric="logLoss", tuneGrid = xgb_grid_1, method = "xgbTree")
+  model <-  train(Label ~ ., data = Training_Data,
+                  trControl = trainControl(method="none"),
+                  metric="logLoss", 
+                  tuneGrid = parameter_grid, 
+                  method = "xgbTree")
   
-  return(varImp(xgb_tree, scale = FALSE))
+  return(varImp(model, scale = FALSE))
+}
+
+caret_model <- function(Training_Data, Method, Tuning_Grid) {
+  fitControl <- trainControl(method = "repeatedcv",
+                             number = 3,
+                             repeats = 3)
+
+  if (Method == 'nnet') {
+    model <- train(Label ~ ., data = Training_Data, 
+                   method = Method, 
+                   trControl = fitControl,
+                   verbose = FALSE, 
+                   tuneGrid = Tuning_Grid,
+                   trace = FALSE)
+  }
+  else {
+    model <- train(Label ~ ., data = Training_Data, 
+                   method = Method, 
+                   trControl = fitControl,
+                   verbose = FALSE, 
+                   tuneGrid = Tuning_Grid)
+  }
+  
+  return(model)
 }
 
 standardise <- function(Dataset, Means, SDs) {

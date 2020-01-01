@@ -21,6 +21,7 @@ library('gridExtra')
 library('caret')
 library('mlbench')
 library('nnet')
+library('kknn')
 library('rlist')
 library('xgboost')
 
@@ -94,15 +95,24 @@ dateranges <- create_dateranges(features, labels, ANALYSIS_MODE, BACKTEST_DAYS, 
 
 ----
 
-#### Feature Expansion and Predictor Modelling
-```{r train or load models, fig.width = 12, fig.height = 4}
+#### Feature Expansion and Modelling
+```{r train or load models}
 
-model_lists <- train_or_load_models(dateranges, features, labels, MODEL_TRAINING_DAYS)
+# calculate model training data
+models <- train_or_load_models(dateranges, features, labels, MODEL_TRAINING_DAYS)
 
-grid.arrange(model_lists[[1]]$ma_crossover$Feature_Importance_Plot, 
-             model_lists[[1]]$dates$Feature_Importance_Plot, 
-             nrow=1,ncol=2)
 ```
+
+* Feature sets created:  `r length(models[[1]])`
+* Model types created: 3
+* Models created: `r length(models[[1]]) * 3`
+
+``` {r Chart Models, fig.width = 20}
+if (ANALYSIS_MODE <= 1) {
+  #plot model training data
+  do.call("grid.arrange", c(chart_models_list(models), ncol=4))
+}
+``` 
 
 ----
 
