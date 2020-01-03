@@ -68,7 +68,7 @@ train_model <- function(Features, Labels, Feature_Function) {
   ggplot_linear_model <- plot(linear_model)
   
   # Return the model and other properties
-  model_properties = list(as.character(substitute(Feature_Function)),
+  model_properties = list(Feature_Function,
                           ggplot_imp, 
                           var_list$Variable,
                           curated_training,
@@ -95,6 +95,42 @@ train_model <- function(Features, Labels, Feature_Function) {
                               'linear_model_plot')
   
   return(model_properties)
+}
+
+
+test_models <- function(Dateranges, Features, Labels, Models, Training_Days) {
+  i <- 1
+  x <- 1
+  model_tests <- list()
+  for (i in range(1:length(Models))) {
+    test_data <- extract_training_data(daterange, Features, Labels, Mode = 'ENSEMBLE', Training_Days)
+    for (model in Models[[i]]) {
+      model_tests[x] <-  test_model(test_data, model) %>% list()
+    }
+  }
+  return(model_tests)
+}
+
+test_model <- function(Test_Data, Model) {
+
+  test_data = Test_Data$Features
+              %>% Model$Feature_Function() %>%
+              merge(Labels, by = "Date", all = FALSE)
+  
+  training <- engineered_training %>% 
+              select(-Date) %>%
+              standardise(Model$Saling_means, Model$Scaling_sds)
+  
+  curated_training <- training %>%
+                      select(one_of(c(Model$Chosen_Feature_Vector, 'Label')))
+  
+  nn_prediction <- predict(Model$nn_model, newdata = curated_training)
+  
+  model_tests = list(curated_training, 
+                     nn_prediction)
+  
+  names(model_properties) = c('curated_training',
+                              'nn_prediction')
 }
 
 xgb_tree_importance <- function(Training_Data) {
@@ -146,6 +182,7 @@ de_standardise <- function(Dataset, Means, SDs) {
   res <- data.frame(mapply('+', Dataset, Means, SIMPLIFY = FALSE))
   return(res)
 }
+
 
 train_ensemble <- function(Dataset, Models) {
   ensemble = 'Ensemble_1'

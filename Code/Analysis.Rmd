@@ -98,8 +98,9 @@ dateranges <- create_dateranges(features, labels, ANALYSIS_MODE, BACKTEST_DAYS, 
 #### Feature Expansion and Modelling
 ```{r train or load models}
 
-# calculate model training data
-models <- train_or_load_models(dateranges, features, labels, MODEL_TRAINING_DAYS)
+if (ANALYSIS_MODE <= 1) {
+  models <- train_or_load_models(dateranges, features, labels, MODEL_TRAINING_DAYS)
+}
 
 ```
 
@@ -107,12 +108,21 @@ models <- train_or_load_models(dateranges, features, labels, MODEL_TRAINING_DAYS
 * Model types created: 3
 * Models created: `r length(models[[1]]) * 3`
 
-``` {r Chart Models, fig.width = 20}
+``` {r Grid Search Cross Validataion Charts, fig.width = 20}
+
 if (ANALYSIS_MODE <= 1) {
-  #plot model training data
   do.call("grid.arrange", c(chart_models_list(models), ncol=4))
 }
+
 ``` 
+
+```{r test models}
+
+if (ANALYSIS_MODE <= 1) {
+  model_testing <- test_models(dateranges, features, labels, models, ENSEMBLE_TRAINING_DAYS)
+}
+
+```
 
 ----
 
