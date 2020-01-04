@@ -1,6 +1,6 @@
 # --------------------------------------------------------
 # MA Crossover Features ----------------------------------
-generate_MA_crossover_data <- function(Data) {
+ma_crossover_features <- function(Data) {
   count = 1
   for (i in 1 : length(SHORT_MAS)) {
     short_MA = SHORT_MAS[i]
@@ -36,7 +36,7 @@ single_MA_crossover <- function(Data, short_MA, long_MA) {
 
 # --------------------------------------------------------
 # Dates Features -----------------------------------------
-generate_dates_data <- function(Data) {
+dates_features <- function(Data) {
   Data %>%
     mutate(Part_Of_Year = yday(Date)/365) %>%
     mutate(Part_Of_Month = day(Date)/31) %>%

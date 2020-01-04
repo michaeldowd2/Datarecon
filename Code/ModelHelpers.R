@@ -4,8 +4,8 @@ train_or_load_models <- function(Dateranges, Features, Labels, Training_Days) {
     for (i in 1 : length(Dateranges)) {
       daterange = Dateranges[[i]]
       model_lists[i] = extract_training_data(daterange, Features, Labels, Mode = 'MODEL', Training_Days) %>%
-        train_models() %>%
-        list()
+                       train_feature_models() %>%
+                       list()
     }
   }
   return(model_lists)
@@ -25,14 +25,13 @@ train_or_load_ensembles <- function(Dateranges, Features, Labels, Model_Lists, T
   return(ensembles)
 }
 
-train_models <- function(Dataset) {
-
-  ma_crossover <- train_model(Dataset$Features, Dataset$Labels, generate_MA_crossover_data)
-  dates <- train_model(Dataset$Features, Dataset$Labels, generate_dates_data)
-  
-  model_list <- list(ma_crossover, dates)
-  names(model_list) <- c('ma_crossover', 'dates')
-  return(model_list)
+train_feature_models <- function(Dataset) {
+  feature_models_list <- list()
+  for (feature in FEATURE_GENERATORS) {
+    feature_models <- train_model(Dataset$Features, Dataset$Labels, match.fun(feature))
+    feature_models_list <- list.append(feature_models_list, gen = feature_models)
+  }
+  return(feature_models_list)
 }
 
 train_model <- function(Features, Labels, Feature_Function) {
@@ -57,43 +56,24 @@ train_model <- function(Features, Labels, Feature_Function) {
   
   curated_training <- training %>%
                       select(one_of(c(var_list$Variable, 'Label')))
+
+  model_properties = list('Feature_Function' = Feature_Function,
+                          'Feature_Importance_Plot' = ggplot_imp, 
+                          'Chosen_Features_Vector' = var_list$Variable,
+                          'Curated_Training_Set' = curated_training,
+                          'scaling_means' = scaling_means,
+                          'scaling_sds' = scaling_sds)
   
-  nn_model <- caret_model(curated_training, "nnet", expand.grid(size = (5:10), decay = c(1.0e-3, 1.0e-2, 1.0e-1)))
-  ggplot_nn_model <- plot(nn_model)
-  
-  knn_model <- caret_model(curated_training, "kknn", expand.grid(kmax = seq(4, 20, by = 2), kernel = c('rectangular', 'gaussian', 'optimal'), distance = 2))
-  ggplot_knn_model <- plot(knn_model)
-  
-  linear_model <- caret_model(curated_training, "gbm", expand.grid(interaction.depth = c(1,5,9), n.trees = (1:30)*50, shrinkage = 0.1, n.minobsinnode=20))
-  ggplot_linear_model <- plot(linear_model)
-  
-  # Return the model and other properties
-  model_properties = list(Feature_Function,
-                          ggplot_imp, 
-                          var_list$Variable,
-                          curated_training,
-                          scaling_means,
-                          scaling_sds,
-                          nn_model,
-                          ggplot_nn_model,
-                          knn_model,
-                          ggplot_knn_model,
-                          linear_model,
-                          ggplot_linear_model)
-  
-  names(model_properties) = c('Feature_Function',
-                              'Feature_Importance_Plot', 
-                              'Chosen_Features_Vector',
-                              'Curated_Training_Set',
-                              'scaling_means',
-                              'scaling_sds',
-                              'nn_model',
-                              'nn_model_plot',
-                              'knn_model',
-                              'knn_model_plot',
-                              'linear_model',
-                              'linear_model_plot')
-  
+  for (i in 1 : length(CARET_MODELS)) {
+    grid <- CARET_MODELS[[i]]
+    mod_name <- names(CARET_MODELS)[i]
+    model <- train_caret_model(curated_training, mod_name, grid)
+    model_properties <- list.append(model_properties, model)
+    model_properties <- list.append(model_properties, plot(model))
+    names(model_properties)[length(model_properties) - 1] <- mod_name
+    names(model_properties)[length(model_properties)] <- paste(mod_name, 'plot', sep = '_')
+  }
+
   return(model_properties)
 }
 
@@ -111,26 +91,18 @@ test_models <- function(Dateranges, Features, Labels, Models, Training_Days) {
   return(model_tests)
 }
 
-test_model <- function(Test_Data, Model) {
+model_predict <- function(Test_Data, Model) {
 
-  test_data = Test_Data$Features
-              %>% Model$Feature_Function() %>%
-              merge(Labels, by = "Date", all = FALSE)
+  testing_data = Test_Data$Features %>% 
+                 Model$Feature_Function() %>%
+                 merge(Labels, by = "Date", all = FALSE) %>%
+                 select(one_of(c(Model$Chosen_Feature_Vector, 'Label')))
+                 standardise(Model$Scaling_means, Model$Scaling_sds)
   
-  training <- engineered_training %>% 
-              select(-Date) %>%
-              standardise(Model$Saling_means, Model$Scaling_sds)
-  
-  curated_training <- training %>%
-                      select(one_of(c(Model$Chosen_Feature_Vector, 'Label')))
-  
-  nn_prediction <- predict(Model$nn_model, newdata = curated_training)
-  
-  model_tests = list(curated_training, 
-                     nn_prediction)
-  
-  names(model_properties) = c('curated_training',
-                              'nn_prediction')
+  for (i in seq(7, length(Model), by = 2)) {
+    predictions <- predict(Model[i], newdata = testing_data)
+  }
+                
 }
 
 xgb_tree_importance <- function(Training_Data) {
@@ -147,7 +119,7 @@ xgb_tree_importance <- function(Training_Data) {
   return(varImp(model, scale = FALSE))
 }
 
-caret_model <- function(Training_Data, Method, Tuning_Grid) {
+train_caret_model <- function(Training_Data, Method, Tuning_Grid) {
   fitControl <- trainControl(method = "repeatedcv",
                              number = 3,
                              repeats = 3)

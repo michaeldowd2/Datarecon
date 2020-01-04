@@ -46,16 +46,22 @@ ENSEMBLE_TRAINING_DAYS = params$ENSEMBLE_TRAINING_DAYS_PAR # 500
 
 # Targets and Features
 DATA_FILES <- c('SANDP.csv', 'DJI.csv', 'VIX.csv')
-#TARGET_COLS <- c('SANDP.Close')
 TARGET_COLS <- params$TARGET_COLS_PAR 
 print(TARGET_COLS)
 TARGET_LEADS <- c(0) 
 TARGET_DIFFS <- c(-0.1, -0.7) # std diff
-#FEATURE_COLS <- c('SANDP.Open', 'SANDP.High', 'SANDP.Low', 'SANDP.Close', 'DJI.Close', 'VIX.Close')
 FEATURE_COLS <- params$FEATURE_COLS_PAR
 FEATURE_LAGS <- c(0, 1, 1, 1, 1, 1) 
 
-# Feature Engineering
+# Caret Models: grid search parameters and caret function name
+CARET_MODELS <- list(nnet = expand.grid(size = (5:10), decay = c(1.0e-3, 1.0e-2, 1.0e-1)),
+                     kknn = expand.grid(kmax = seq(4, 20, by = 2), kernel = c('rectangular', 'gaussian', 'optimal'), distance = 2),
+                     gbm = expand.grid(interaction.depth = c(1,5,9), n.trees = (1:30)*50, shrinkage = 0.1, n.minobsinnode=20))
+
+# Features
+FEATURE_GENERATORS <- c('ma_crossover_features', 
+                        'dates_features')
+
 SHORT_MAS <- params$SHORT_MAS_PAR #c(5, 7, 10, 15)
 LONG_MAS <- c(12, 20, 30, 40)
 AGGREGATE_WINDOWS <- c(5) #, 10, 20) # 3
@@ -82,10 +88,8 @@ master_data <- create_master_dataframe(DATA_FILES, c(FEATURE_COLS, TARGET_COLS))
 ```{r Offsetting, results = 'hide'}
 features <- master_data %>% 
             offset_columns(Columns = FEATURE_COLS, Lags = FEATURE_LAGS)
-
 labels <- master_data %>% 
           offset_columns(Columns = TARGET_COLS, Leads = TARGET_LEADS)
-
 dateranges <- create_dateranges(features, labels, ANALYSIS_MODE, BACKTEST_DAYS, MODEL_TRAINING_DAYS, ENSEMBLE_TRAINING_DAYS)
 ```
 
@@ -97,11 +101,7 @@ dateranges <- create_dateranges(features, labels, ANALYSIS_MODE, BACKTEST_DAYS, 
 
 #### Feature Expansion and Modelling
 ```{r train or load models}
-
-if (ANALYSIS_MODE <= 1) {
-  models <- train_or_load_models(dateranges, features, labels, MODEL_TRAINING_DAYS)
-}
-
+models <- train_or_load_models(dateranges, features, labels, MODEL_TRAINING_DAYS)
 ```
 
 * Feature sets created:  `r length(models[[1]])`
@@ -109,26 +109,12 @@ if (ANALYSIS_MODE <= 1) {
 * Models created: `r length(models[[1]]) * 3`
 
 ``` {r Grid Search Cross Validataion Charts, fig.width = 20}
-
-if (ANALYSIS_MODE <= 1) {
-  do.call("grid.arrange", c(chart_models_list(models), ncol=4))
-}
-
+do.call("grid.arrange", c(chart_models_list(models), ncol=(length(CARET_MODELS)+1)))
 ``` 
-
-```{r test models}
-
-if (ANALYSIS_MODE <= 1) {
-  model_testing <- test_models(dateranges, features, labels, models, ENSEMBLE_TRAINING_DAYS)
-}
-
-```
 
 ----
 
 #### Ensemble Modelling
 ```{r train or load ensembles, fig.width = 12, fig.height = 4}
-
-ensembles <- train_or_load_ensembles(dateranges, features, labels, model_lists, ENSEMBLE_TRAINING_DAYS)
-
+#ensembles <- train_or_load_ensembles(dateranges, features, labels, model_lists, ENSEMBLE_TRAINING_DAYS)
 ```
