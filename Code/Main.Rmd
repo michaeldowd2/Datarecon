@@ -1,8 +1,12 @@
 ---
-title: "Home"
+title: "Data-Recon"
 author: "Michael Dowd"
 date: "12/26/2019"
-output: html_document
+output: 
+  html_document:
+    theme: null
+    highlight: null
+    mathjax: null
 ---
 
 ```{r setup_main, include=FALSE}
@@ -11,40 +15,30 @@ library('yaml')
 source('DataHelpers.R')
 ```
 
-## Data downlaod
+## What is this?
+This is a set of parameterised r-markdown files designed to automatically detect features and build ensemble models for regression and classification tasks
 
-|               | Start | Finish |
-| ------------- |:-------------:|:-------------:|
-| Data Downlaod | X | Y |
+----
 
-## Live analysis predictions
+## Analysis Iterator
+The analysis iterator runs the analysis markdown file against each of the analyses in this folder.
 ``` {r run analyses predictions, results = 'hide'}
+
+start_time <- Sys.time()
 
 #1 get all analyses
 par_path <- parent_path()
 analyses <-  list.dirs(path = paste(par_path, "./Output/", sep =""), full.names = TRUE, recursive = FALSE)
 for (analysis in analyses) {
-  
   # parameters
   paras <-  read_yaml(paste(analysis, 'parameters.yml', sep = '/'))
-  
-  # Add parameter for running in prediction mode
-  # paras.append(Mode = 2)
-  
   # render
   rmarkdown::render(input = 'Analysis.rmd', output_dir = analysis, params = paras)
 }
 
+end_time <- Sys.time()
 ```
 
-
-|               | Start | Finish |
-| ------------- |:-------------:|:-------------:|
-| Analysis Predictions | X | Y |
-
-## Analysis reruns and model training
-
-
-|               | Start | Finish |
-| ------------- |:-------------:|:-------------:|
-| Analysis rerun | X | Y |
+* The last analysis iterator ran at: `r start_time`
+* It ran: `r length(analyses)` analyses
+* It took: `r end_time - start_time` s

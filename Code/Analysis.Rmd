@@ -1,7 +1,11 @@
 ---
 title: "Short S & P Analysis"
 date: "12/4/2019"
-output: html_document
+output: 
+  html_document:
+    theme: null
+    highlight: null
+    mathjax: null
 params: 
   TARGET_COLS_PAR: [SANDP.Close]
   FEATURE_COLS_PAR: [SANDP.Open,SANDP.High,SANDP.Low,SANDP.Close,DJI.Close,VIX.Close]
