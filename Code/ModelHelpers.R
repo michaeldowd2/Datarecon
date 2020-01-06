@@ -11,16 +11,14 @@ train_or_load_models <- function(Dateranges, Features, Labels, Training_Days) {
   return(model_lists)
 }
 
-train_or_load_ensembles <- function(Dateranges, Features, Labels, Model_Lists, Training_Days) {
+train_or_load_ensembles <- function(Dateranges, Features, Labels, Feature_Sets, Training_Days) {
   ensembles = list()
-  if (ANALYSIS_MODE == 0 | ANALYSIS_MODE == 1) { # train models for each date
-    for (i in 1 : length(Dateranges)) {
-      daterange = Dateranges[[i]]
-      model_list = Model_Lists[[i]]
-      ensembles[i] = extract_training_data(daterange, Features, Labels, Mode = 'ENSEMBLE', Training_Days) %>%
-        train_ensemble(model_list) %>%
-        list()
-    }
+  for (i in 1 : length(Dateranges)) {
+    daterange = Dateranges[[i]]
+    feature_sets = Feature_Sets[[i]]
+    ensembles[i] = extract_training_data(daterange, Features, Labels, Mode = 'ENSEMBLE', Training_Days) %>%
+                   train_ensemble_models(feature_sets) %>%
+                   list()
   }
   return(ensembles)
 }
@@ -28,7 +26,7 @@ train_or_load_ensembles <- function(Dateranges, Features, Labels, Model_Lists, T
 train_feature_models <- function(Dataset) {
   feature_models_list <- list()
   for (feature in FEATURE_GENERATORS) {
-    feature_models <- train_model(Dataset$Features, Dataset$Labels, match.fun(feature))
+    feature_models <- train_model(Dataset$Features, Dataset$Labels, feature)
     feature_models_list <- list.append(feature_models_list, gen = feature_models)
   }
   return(feature_models_list)
@@ -37,7 +35,8 @@ train_feature_models <- function(Dataset) {
 train_model <- function(Features, Labels, Feature_Function) {
   names(Labels)[2] <- "Label"
   
-  engineered_training = Features %>% Feature_Function() %>%
+  engineered_training = Features %>% 
+                        match.fun(Feature_Function)() %>%
                         merge(Labels, by = "Date", all = FALSE)
   
   # the scaling factors will be used on new data and out of training data
@@ -76,7 +75,6 @@ train_model <- function(Features, Labels, Feature_Function) {
 
   return(model_properties)
 }
-
 
 test_models <- function(Dateranges, Features, Labels, Models, Training_Days) {
   i <- 1
@@ -155,8 +153,20 @@ de_standardise <- function(Dataset, Means, SDs) {
   return(res)
 }
 
-
-train_ensemble <- function(Dataset, Models) {
-  ensemble = 'Ensemble_1'
-  return(ensemble)
+train_ensemble_models <- function(Dataset, Feature_Sets) {
+  ensemble_model_list <- list()
+  
+  model_predictions <- prediction_features(Dataset, Feature_Sets) %>%
+                       select(-Date)
+  
+  for (i in 1 : length(CARET_MODELS)) {
+    grid <- CARET_MODELS[[i]]
+    ensemble_name <- names(CARET_MODELS)[i]
+    model <- train_caret_model(model_predictions, ensemble_name, grid)
+    ensemble_plot_name <- paste(ensemble_name, 'plot', sep = '_')
+    ensemble_model_list[[ensemble_name]] <- model
+    ensemble_model_list[[ensemble_plot_name]] <- plot(model)
+  }
+  
+  return(ensemble_model_list)
 }

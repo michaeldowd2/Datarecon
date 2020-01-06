@@ -12,7 +12,7 @@
 
 
 
-<title>Short S &amp; P Analysis</title>
+<title>Analysis.utf8</title>
 
 
 
@@ -30,8 +30,6 @@
 
 
 
-<h1 class="title toc-ignore">Short S &amp; P Analysis</h1>
-<h4 class="date">12/4/2019</h4>
 
 
 
@@ -56,6 +54,7 @@
 </div>
 <div id="feature-expansion-and-modelling" class="section level4">
 <h4>Feature Expansion and Modelling</h4>
+<p>The model collection is automatically generated using a list of feature expansions with xgboost variable filtering applied. Each resulting feature-set is fed into a user defined list of model types</p>
 <ul>
 <li>Feature sets created: 2</li>
 <li>Model types created: 3</li>
@@ -66,6 +65,11 @@
 </div>
 <div id="ensemble-modelling" class="section level4">
 <h4>Ensemble Modelling</h4>
+<p>The ensemble model collection is created using predictions from the models of the previous step as training data. Again xgboost is used to highlight variable importance, in this case it will select the most important models from the previous step. And again multiple ensemble models are trained for comparison.</p>
+<ul>
+<li>to do: show ensemble output</li>
+</ul>
+<hr />
 </div>
 
 

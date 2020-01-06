@@ -1,7 +1,4 @@
 ---
-title: "Data-Recon"
-author: "Michael Dowd"
-date: "12/26/2019"
 output: 
   html_document:
     theme: null
