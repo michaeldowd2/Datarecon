@@ -46,26 +46,3 @@ dates_features <- function(Data) {
     select(Date, Part_Of_Year, Part_Of_Month, Part_Of_Week) %>%
     return()
 }
-# Predicion Features for ensemble
-prediction_features <- function(Data, Feature_Sets) {
-  results <- Data$Labels
-  for (i in 1 : length(Feature_Sets)) {
-    feature_set <-  Feature_Sets[i]
-    engineered <- Data$Features %>% 
-                  match.fun(feature_set$Feature_Function)() %>%
-                  merge(Data$Labels, by = "Date", all = FALSE) %>%
-                  select(one_of(c(feature_set$Chosen_Feature_Vector, 'Label', 'Date'))) %>% 
-                  standardise(Model$Scaling_means, Model$Scaling_sds)
-    
-    results$Label <- engineered$Label
-    training_data <- features %>% select(-Label-Date)
-    
-    for (i in seq(7, length(feature_set), by = 2))  {
-      model <- feature_set[j]
-      predictions <- predict(feature_set[i], newdata = training_data)
-      column_name <- paste(names(Features[i]), feature_set$Feature_Function, sep='_')
-      result <- cbind(result, !!column_name := predictions)
-    }
-  }
-  return(result)
-}

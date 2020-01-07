@@ -11,13 +11,13 @@ train_or_load_models <- function(Dateranges, Features, Labels, Training_Days) {
   return(model_lists)
 }
 
-train_or_load_ensembles <- function(Dateranges, Features, Labels, Feature_Sets, Training_Days) {
+train_or_load_ensembles <- function(Dateranges, Features, Labels, Expansion_Sets, Training_Days) {
   ensembles = list()
   for (i in 1 : length(Dateranges)) {
     daterange = Dateranges[[i]]
-    feature_sets = Feature_Sets[[i]]
+    expansion_set = Expansion_Sets[[i]]
     ensembles[i] = extract_training_data(daterange, Features, Labels, Mode = 'ENSEMBLE', Training_Days) %>%
-                   train_ensemble_models(feature_sets) %>%
+                   train_ensemble_models(expansion_set) %>%
                    list()
   }
   return(ensembles)
@@ -153,12 +153,14 @@ de_standardise <- function(Dataset, Means, SDs) {
   return(res)
 }
 
-train_ensemble_models <- function(Dataset, Feature_Sets) {
-  ensemble_model_list <- list()
+train_ensemble_models <- function(Dataset, Expansion_Set) {
+  labels <- Dataset$Labels
+  names(labels)[2] <- "Label"
   
-  model_predictions <- prediction_features(Dataset, Feature_Sets) %>%
+  model_predictions <- prediction_features(Dataset$Features, labels, Expansion_Set) %>%
                        select(-Date)
   
+  ensemble_model_list <- list()
   for (i in 1 : length(CARET_MODELS)) {
     grid <- CARET_MODELS[[i]]
     ensemble_name <- names(CARET_MODELS)[i]
@@ -169,4 +171,29 @@ train_ensemble_models <- function(Dataset, Feature_Sets) {
   }
   
   return(ensemble_model_list)
+}
+# Predicion Features for ensemble
+prediction_features <- function(Features, Labels, Expansion_Set) {
+  results <- Labels
+  for (i in 1 : length(Expansion_Set)) {
+    expansion <-  Expansion_Set[[i]]
+    
+    engineered_1 <- Features %>% 
+      match.fun(expansion$Feature_Function)() %>%
+      merge(Labels, by = "Date", all = FALSE) %>%
+      select(-Date) %>%
+      standardise(expansion$scaling_means, expansion$scaling_sds) %>%
+      select(one_of(c(expansion$Chosen_Features_Vector)))
+    
+    results$Label <- engineered$Label
+    training_data <- engineered %>% select(-Label)
+    
+    for (i in seq(7, length(feature_set), by = 2))  {
+      model <- feature_set[j]
+      predictions <- predict(feature_set[i], newdata = training_data)
+      column_name <- paste(names(Features[i]), feature_set$Feature_Function, sep='_')
+      result <- cbind(result, !!column_name := predictions)
+    }
+  }
+  return(result)
 }

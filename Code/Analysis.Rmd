@@ -120,7 +120,7 @@ do.call("grid.arrange", c(chart_models_list(models), ncol=(length(CARET_MODELS)+
 
 #### Ensemble Modelling
 ```{r train or load ensembles, fig.width = 12, fig.height = 4}
-#ensembles <- train_or_load_ensembles(dateranges, features, labels, models, ENSEMBLE_TRAINING_DAYS)
+ensembles <- train_or_load_ensembles(dateranges, features, labels, models, ENSEMBLE_TRAINING_DAYS)
 ```
 
 The ensemble model collection is created using predictions from the models of the previous step as training data. Again xgboost is used to highlight variable importance, in this case it will select the most important models from the previous step. And again multiple ensemble models are trained for comparison.
