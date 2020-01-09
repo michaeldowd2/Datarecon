@@ -37,5 +37,5 @@ end_time <- Sys.time()
 ```
 
 * The last analysis iterator ran at: `r start_time`
-* It ran: `r length(analyses)` analyses
-* It took: `r end_time - start_time` s
+* Analyses run: `r length(analyses)` analyses
+* Time taken: `r end_time - start_time` s

@@ -43,11 +43,12 @@ train_model <- function(Features, Labels, Feature_Function) {
   scaling_means <- engineered_training %>% summarise_at(vars(-Date), mean)
   scaling_sds <- engineered_training %>% summarise_at(vars(-Date), sd)
 
-  training <- engineered_training %>% select(-Date) %>%
-              standardise(scaling_means, scaling_sds)
+  training <- engineered_training %>%
+              standardise(scaling_means, scaling_sds) %>%
+              select(-Date)
   
   xgbTree_imp <- xgb_tree_importance(training)
-  ggplot_imp <- ggplot(xgbTree_imp, top = 10)
+  ggplot_imp <- ggplot(xgbTree_imp, top = 10) + xlab(Feature_Function)
   
   var_list <- xgbTree_imp$importance %>% rownames_to_column(var = "Variable") %>%
               mutate(Variable = str_replace_all(Variable,"`", "")) %>%
@@ -67,10 +68,14 @@ train_model <- function(Features, Labels, Feature_Function) {
     grid <- CARET_MODELS[[i]]
     mod_name <- names(CARET_MODELS)[i]
     model <- train_caret_model(curated_training, mod_name, grid)
-    model_properties <- list.append(model_properties, model)
-    model_properties <- list.append(model_properties, plot(model))
-    names(model_properties)[length(model_properties) - 1] <- mod_name
-    names(model_properties)[length(model_properties)] <- paste(mod_name, 'plot', sep = '_')
+    mod_plot_name <- paste(mod_name, 'plot', sep = '_')
+    #model_properties <- list.append(model_properties, model)
+    #model_properties <- list.append(model_properties, plot(model, ylab = "RMSE"))
+    #names(model_properties)[length(model_properties) - 1] <- mod_name
+    #names(model_properties)[length(model_properties)] <- paste(mod_name, 'plot', sep = '_')
+    
+    model_properties[[mod_name]] <- model
+    model_properties[[mod_plot_name]] <- plot(model, ylab = "RMSE")
   }
 
   return(model_properties)
@@ -87,20 +92,6 @@ test_models <- function(Dateranges, Features, Labels, Models, Training_Days) {
     }
   }
   return(model_tests)
-}
-
-model_predict <- function(Test_Data, Model) {
-
-  testing_data = Test_Data$Features %>% 
-                 Model$Feature_Function() %>%
-                 merge(Labels, by = "Date", all = FALSE) %>%
-                 select(one_of(c(Model$Chosen_Feature_Vector, 'Label')))
-                 standardise(Model$Scaling_means, Model$Scaling_sds)
-  
-  for (i in seq(7, length(Model), by = 2)) {
-    predictions <- predict(Model[i], newdata = testing_data)
-  }
-                
 }
 
 xgb_tree_importance <- function(Training_Data) {
@@ -142,8 +133,11 @@ train_caret_model <- function(Training_Data, Method, Tuning_Grid) {
 }
 
 standardise <- function(Dataset, Means, SDs) {
-  res <- data.frame(mapply('-', Dataset, Means, SIMPLIFY = FALSE))
+  dates <- Dataset$Date
+  res <- Dataset %>% select(-Date)
+  res <- data.frame(mapply('-', res, Means, SIMPLIFY = FALSE))
   res <- data.frame(mapply('/', res, SDs, SIMPLIFY = FALSE))
+  res <- cbind(res, Date = dates)
   return(res)
 }
 
@@ -160,40 +154,46 @@ train_ensemble_models <- function(Dataset, Expansion_Set) {
   model_predictions <- prediction_features(Dataset$Features, labels, Expansion_Set) %>%
                        select(-Date)
   
-  ensemble_model_list <- list()
+  xgbTree_imp <- xgb_tree_importance(model_predictions)
+  ggplot_imp <- ggplot(xgbTree_imp, top = 10) + xlab('Model')
+  
+  ensemble_model_list <- list(ggplot_imp)
+  
   for (i in 1 : length(CARET_MODELS)) {
     grid <- CARET_MODELS[[i]]
     ensemble_name <- names(CARET_MODELS)[i]
     model <- train_caret_model(model_predictions, ensemble_name, grid)
     ensemble_plot_name <- paste(ensemble_name, 'plot', sep = '_')
     ensemble_model_list[[ensemble_name]] <- model
-    ensemble_model_list[[ensemble_plot_name]] <- plot(model)
+    ensemble_model_list[[ensemble_plot_name]] <- plot(model, ylab = "RMSE")
   }
   
   return(ensemble_model_list)
 }
 # Predicion Features for ensemble
 prediction_features <- function(Features, Labels, Expansion_Set) {
-  results <- Labels
+  end_results <- Labels
   for (i in 1 : length(Expansion_Set)) {
     expansion <-  Expansion_Set[[i]]
     
-    engineered_1 <- Features %>% 
+    engineered <- Features %>% 
       match.fun(expansion$Feature_Function)() %>%
       merge(Labels, by = "Date", all = FALSE) %>%
-      select(-Date) %>%
       standardise(expansion$scaling_means, expansion$scaling_sds) %>%
-      select(one_of(c(expansion$Chosen_Features_Vector)))
+      select(one_of(c(expansion$Chosen_Features_Vector, 'Label', 'Date')))
     
-    results$Label <- engineered$Label
-    training_data <- engineered %>% select(-Label)
+    if (i == 1) { end_results <- engineered %>% select(Date, Label) }
+    results <- engineered %>% select(Date)
+    training_data <- engineered %>% select(-c(Label, Date))
     
-    for (i in seq(7, length(feature_set), by = 2))  {
-      model <- feature_set[j]
-      predictions <- predict(feature_set[i], newdata = training_data)
-      column_name <- paste(names(Features[i]), feature_set$Feature_Function, sep='_')
-      result <- cbind(result, !!column_name := predictions)
+    for (i in seq(7, length(expansion), by = 2))  {
+      model <- expansion[[i]]
+      predictions <- predict(model, newdata = training_data)
+      column_name <- paste(names(expansion)[i], expansion$Feature_Function, sep='_')
+      results[[column_name]] <- predictions
     }
+    end_results <- end_results %>%
+      merge(results, by = "Date", all = FALSE)
   }
-  return(result)
+  return(end_results)
 }
