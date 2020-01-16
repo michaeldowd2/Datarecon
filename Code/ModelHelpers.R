@@ -151,7 +151,7 @@ train_ensemble_models <- function(Dataset, Expansion_Set) {
   labels <- Dataset$Labels
   names(labels)[2] <- "Label"
   
-  model_predictions <- prediction_features(Dataset$Features, labels, Expansion_Set) %>%
+  model_predictions <- model_predict(Dataset$Features, labels, Expansion_Set) %>%
                        select(-Date)
   
   xgbTree_imp <- xgb_tree_importance(model_predictions)
@@ -171,7 +171,7 @@ train_ensemble_models <- function(Dataset, Expansion_Set) {
   return(ensemble_model_list)
 }
 # Predicion Features for ensemble
-prediction_features <- function(Features, Labels, Expansion_Set) {
+model_predict <- function(Features, Labels, Expansion_Set) {
   end_results <- Labels
   for (i in 1 : length(Expansion_Set)) {
     expansion <-  Expansion_Set[[i]]
@@ -196,4 +196,11 @@ prediction_features <- function(Features, Labels, Expansion_Set) {
       merge(results, by = "Date", all = FALSE)
   }
   return(end_results)
+}
+
+model_summary_dataframe <- function(Dataset, Expansion_Set) {
+  labels <- Dataset$Labels
+  names(labels)[2] <- "Label"
+  predictions <- model_predict(Dataset$Features, labels, Expansion_Set)
+  df <- data.frame(matrix(ncol=4, nrow=0, dimnames=list(NULL, c('date', 'model_type', 'feature_type', 'test_accuracy'))))
 }
