@@ -1,0 +1,56 @@
+---
+output: 
+  html_document:
+    theme: null
+    highlight: null
+    mathjax: null
+---
+
+```{r setup_main, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library('yaml')
+source('DataHelpers.R')
+```
+
+## What is this?
+This is a set of parameterised r-markdown files designed to automatically detect features and build ensemble models for regression and classification prediction over time-series data.
+
+----
+
+## Analysis
+``` {r run analyses predictions, results = 'hide'}
+
+start_time <- Sys.time()
+
+#1 get all analyses
+par_path <- parent_path()
+analyses <-  list.dirs(path = paste(par_path, "./Output/", sep =""), full.names = TRUE, recursive = FALSE)
+for (analysis in analyses) {
+  # parameters
+  paras <-  read_yaml(paste(analysis, 'parameters.yml', sep = '/'))
+  # render
+  rmarkdown::render(input = 'Analysis.rmd', output_dir = analysis, params = paras)
+}
+
+end_time <- Sys.time()
+```
+
+The analysis process iterates through the dataset as follows:
+
+1. Loads most recent saved models (Not yet implemented)
+2. Load the latest data for the selected date, which may be current or historic.
+3. Run predictions
+2. Train a new set of regression and ensemble models using the most up-to-date data for the selected date
+5. Saves these models (Not yet implemented)
+6. Step forward the selected date, or if running live, wait for the next available data (Not yet implemented)
+7. Repeat...
+
+![Summary of iterative training and prediction process](https://raw.githubusercontent.com/michaeldowd2/Datarecon/master/Images/TrainingAndPredictionSummary.JPG)
+
+For each date the analysis trains a set of predictors on the most recently available data. The resulting models are then run over a segmented set of data, from which the predictions are fed into a set of ensemble models. This works to prevent overfitting whilst still allowing the underlying predictors to be trained with the most up to date data. Here's a zoomed in view of the process for just one day:
+
+![Summary of daily training and prediction process](https://raw.githubusercontent.com/michaeldowd2/Datarecon/master/Images/DailySummary.JPG)
+
+* The last analysis iterator ran at: `r start_time`
+* Analyses run: `r length(analyses)` analyses
+* Time taken: `r end_time - start_time` s
