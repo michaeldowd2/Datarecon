@@ -74,32 +74,14 @@ DIFF_CLASSES <- c(0.1) # , 1, 2) # labels for small move, medium move and large 
 print(TARGET_COLS)
 ```
 
-#### Data Loading
 ```{r Data Loading_analysis, results = "hide"}
 master_data <- create_master_dataframe(DATA_FILES, c(FEATURE_COLS, TARGET_COLS))
-```
-
-* Files Loaded:  `r length(DATA_FILES)`
-* Latest matched date: `r max(master_data$Date)`
-* Earliest matched date: `r min(master_data$Date)`
-* Total data points: `r length(master_data$Date)`
-
-----
-
-#### Offset Features and Labels
-```{r Offsetting, results = 'hide'}
 features <- master_data %>% 
             offset_columns(Columns = FEATURE_COLS, Lags = FEATURE_LAGS)
 labels <- master_data %>% 
           offset_columns(Columns = TARGET_COLS, Leads = TARGET_LEADS)
 dateranges <- create_dateranges(features, labels, ANALYSIS_MODE, BACKTEST_DAYS, MODEL_TRAINING_DAYS, ENSEMBLE_TRAINING_DAYS)
 ```
-
-* Number of base features:  `r length(features)`
-* Number of base labels:  `r length(labels)`
-* Offetting:  `r sum(FEATURE_LAGS)` / `r length(FEATURE_LAGS)` columns
-
-----
 
 #### Feature Expansion and Modelling
 ```{r train or load models}
