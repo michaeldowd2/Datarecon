@@ -1,0 +1,113 @@
+---
+output: 
+  html_document:
+    theme: null
+    highlight: null
+    mathjax: null
+params: 
+  TARGET_COLS_PAR: [SANDP.Close]
+  FEATURE_COLS_PAR: [SANDP.Open,SANDP.High,SANDP.Low,SANDP.Close,DJI.Close,VIX.Close]
+  SHORT_MAS_PAR: [5,7,10,15]
+  ENSEMBLE_TRAINING_DAYS_PAR: 500
+---
+
+```{r setup_analyisis, include=FALSE, results="hide"}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library('tidyverse')
+library('lubridate')
+library('reshape2')
+library('corrplot')
+library('RcppRoll')
+library('ggjoy')
+library('gridExtra')
+library('caret')
+library('mlbench')
+library('nnet')
+library('kknn')
+library('rlist')
+library('xgboost')
+
+source('DataHelpers.R')
+source('ModelHelpers.R')
+source('ChartHelpers.R')
+source('FeatureEngineering.R')
+set.seed(42)
+```
+
+```{r Global Variables, include=FALSE, results='hide'}
+DEBUG = 1
+
+# Analysis Mode
+# 0 - Full Backtest: run over a over historic days with retraining after every day
+# 1 - Retrain: retrain models using the latest data -1 date (current close, max and min will be incorrect)
+# 2 - Prediction: just load data and run predictions using the latest data
+ANALYSIS_MODE = 1
+BACKTEST_DAYS = 500
+MODEL_TRAINING_DAYS = 500
+ENSEMBLE_TRAINING_DAYS = params$ENSEMBLE_TRAINING_DAYS_PAR # 500
+
+# Targets and Features
+DATA_FILES <- c('SANDP.csv', 'DJI.csv', 'VIX.csv')
+TARGET_COLS <- params$TARGET_COLS_PAR 
+print(TARGET_COLS)
+TARGET_LEADS <- c(0) 
+TARGET_DIFFS <- c(-0.1, -0.7) # std diff
+FEATURE_COLS <- params$FEATURE_COLS_PAR
+FEATURE_LAGS <- c(0, 1, 1, 1, 1, 1) 
+
+# Caret Models: grid search parameters and caret function name
+CARET_MODELS <- list(nnet = expand.grid(size = (5:10), decay = c(1.0e-3, 1.0e-2, 1.0e-1)),
+                     kknn = expand.grid(kmax = seq(4, 20, by = 2), kernel = c('rectangular', 'gaussian', 'optimal'), distance = 2),
+                     gbm = expand.grid(interaction.depth = c(1,5,9), n.trees = (1:30)*50, shrinkage = 0.1, n.minobsinnode=20))
+
+# Features
+FEATURE_GENERATORS <- c('ma_crossover_features', 
+                        'dates_features')
+
+SHORT_MAS <- params$SHORT_MAS_PAR #c(5, 7, 10, 15)
+LONG_MAS <- c(12, 20, 30, 40)
+AGGREGATE_WINDOWS <- c(5) #, 10, 20) # 3
+AGGREGATE_FUNCTIONS <- c('Mean') #, 'SD') # 3 x 2 = 6
+LAGSTEPS <- 5 # 6 x (5 + 1) = 36, variable multiplier
+DIFF_CLASSES <- c(0.1) # , 1, 2) # labels for small move, medium move and large move
+
+```
+
+#### Data Loading
+```{r Data Loading_analysis, results = "hide"}
+master_data <- create_master_dataframe(DATA_FILES, c(FEATURE_COLS, TARGET_COLS))
+```
+
+* Files Loaded:  `r length(DATA_FILES)`
+* Latest matched date: `r max(master_data$Date)`
+* Earliest matched date: `r min(master_data$Date)`
+* Total data points: `r length(master_data$Date)`
+
+----
+
+#### Offset Features and Labels
+```{r Offsetting, results = 'hide'}
+features <- master_data %>% 
+            offset_columns(Columns = FEATURE_COLS, Lags = FEATURE_LAGS)
+labels <- master_data %>% 
+          offset_columns(Columns = TARGET_COLS, Leads = TARGET_LEADS)
+dateranges <- create_dateranges(features, labels, ANALYSIS_MODE, BACKTEST_DAYS, MODEL_TRAINING_DAYS, ENSEMBLE_TRAINING_DAYS)
+```
+
+* Number of base features:  `r length(features)`
+* Number of base labels:  `r length(labels)`
+* Offetting:  `r sum(FEATURE_LAGS)` / `r length(FEATURE_LAGS)` columns
+
+----
+
+#### Model Loading
+```{r Load Models, results = 'hide'}
+# To Do
+```
+
+----
+
+#### Prediction
+```{r Prediction, results = 'hide'}
+# To Do
+```

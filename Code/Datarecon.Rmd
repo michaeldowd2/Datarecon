@@ -17,40 +17,63 @@ This is a set of parameterised r-markdown files designed to automatically detect
 
 ----
 
-## Analysis
-``` {r run analyses predictions, results = 'hide'}
+At a high level, the system is being designed to run a number of sequential steps on a daily basis. Some thought has been put into how to deal with the staggered availability of time-series data, in particular at what point to run the predictive models to allow for the most up to date data and at what point and with which data to retrain them. The daily process would look like this:
 
+1. Scrape prediction data (eg for stock prices, market Opening price may be required) ^1^
+1. Loads most recent saved models ^1^
+2. Load the time series data, including scraped datapoints
+3. Run predictive models ^1^
+4. At a point when all data is published for current date, scrape the rest of the data (eg at market close, clowing price, high, low and volume are available) ^1^
+2. Train a new set of regression and ensemble models using the most up-to-date data for the selected date
+5. Saves these models ^1^
+
+^1^ Not implemented
+
+![Summary of iterative training and prediction process](https://raw.githubusercontent.com/michaeldowd2/Datarecon/master/Images/TrainingAndPredictionSummary.JPG){ width=480px }
+
+For each date the analysis trains a set of predictors on the most recently available data. The resulting models are then run over a segmented set of data, from which the predictions are fed into a set of ensemble models. This works to prevent overfitting whilst still allowing the underlying predictors to be trained with the most up to date data. Here's a zoomed in view of the process for just one day:
+
+![Summary of daily training and prediction process](https://raw.githubusercontent.com/michaeldowd2/Datarecon/master/Images/DailySummary.JPG){ width=480px }
+
+----
+
+## Model Predictions
+``` {r run model predictions, results = 'hide'}
 start_time <- Sys.time()
 
 #1 get all analyses
 par_path <- parent_path()
-analyses <-  list.dirs(path = paste(par_path, "./Output/", sep =""), full.names = TRUE, recursive = FALSE)
-for (analysis in analyses) {
+predictors <-  list.dirs(path = paste(par_path, "./Output/", sep =""), full.names = TRUE, recursive = FALSE)
+for (predictor in predictors) {
   # parameters
-  paras <-  read_yaml(paste(analysis, 'parameters.yml', sep = '/'))
-  # render
-  rmarkdown::render(input = 'Analysis.rmd', output_dir = analysis, params = paras)
+  paras <-  read_yaml(paste(predictor, 'parameters.yml', sep = '/'))
+  rmarkdown::render(input = 'Prediction.rmd', output_dir = predictor, params = paras)
 }
 
 end_time <- Sys.time()
 ```
 
-The analysis process iterates through the dataset as follows:
+* The last prediction iterator ran at: `r start_time`
+* Number of Predictions run: `r length(predictors)`
+* Time taken: `r end_time - start_time` s
 
-1. Loads most recent saved models (Not yet implemented)
-2. Load the latest data for the selected date, which may be current or historic.
-3. Run predictions
-2. Train a new set of regression and ensemble models using the most up-to-date data for the selected date
-5. Saves these models (Not yet implemented)
-6. Step forward the selected date, or if running live, wait for the next available data (Not yet implemented)
-7. Repeat...
+## Model Training
+``` {r run trainings, results = 'hide'}
+start_time <- Sys.time()
 
-![Summary of iterative training and prediction process](https://raw.githubusercontent.com/michaeldowd2/Datarecon/master/Images/TrainingAndPredictionSummary.JPG)
+#1 get all analyses
+par_path <- parent_path()
+predictors <-  list.dirs(path = paste(par_path, "./Output/", sep =""), full.names = TRUE, recursive = FALSE)
+for (predictor in predictors) {
+  # parameters
+  paras <-  read_yaml(paste(predictor, 'parameters.yml', sep = '/'))
+  # 1 Predictions
+  rmarkdown::render(input = 'Training.rmd', output_dir = predictor, params = paras)
+}
 
-For each date the analysis trains a set of predictors on the most recently available data. The resulting models are then run over a segmented set of data, from which the predictions are fed into a set of ensemble models. This works to prevent overfitting whilst still allowing the underlying predictors to be trained with the most up to date data. Here's a zoomed in view of the process for just one day:
+end_time <- Sys.time()
+```
 
-![Summary of daily training and prediction process](https://raw.githubusercontent.com/michaeldowd2/Datarecon/master/Images/DailySummary.JPG)
-
-* The last analysis iterator ran at: `r start_time`
-* Analyses run: `r length(analyses)` analyses
+* The last training iterator ran at: `r start_time`
+* Number of predictors trained: `r length(predictors)`
 * Time taken: `r end_time - start_time` s
