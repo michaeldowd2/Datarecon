@@ -1,33 +1,20 @@
-train_or_load_models <- function(Dateranges, Features, Labels, Training_Days) {
-  model_lists = list()
-  if (ANALYSIS_MODE == 0 | ANALYSIS_MODE == 1) { # train models for each date
-    for (i in 1 : length(Dateranges)) {
-      daterange = Dateranges[[i]]
-      model_lists[i] = extract_training_data(daterange, Features, Labels, Mode = 'MODEL', Training_Days) %>%
-                       train_feature_models() %>%
-                       list()
-    }
-  }
-  return(model_lists)
+train_models <- function(Dates, Features, Labels) {
+  models <- extract_training_data(Dates, Features, Labels, Mode = 'MODEL', MODEL_TRAINING_DAYS) %>%
+    train_feature_models()
+  return(models)
 }
 
-train_or_load_ensembles <- function(Dateranges, Features, Labels, Expansion_Sets, Training_Days) {
-  ensembles = list()
-  for (i in 1 : length(Dateranges)) {
-    daterange = Dateranges[[i]]
-    expansion_set = Expansion_Sets[[i]]
-    ensembles[i] = extract_training_data(daterange, Features, Labels, Mode = 'ENSEMBLE', Training_Days) %>%
-                   train_ensemble_models(expansion_set) %>%
-                   list()
-  }
+train_ensembles <- function(Dates, Features, Labels, Expansion_Set) {
+  ensembles = extract_training_data(Dates, Features, Labels, Mode = 'ENSEMBLE', ENSEMBLE_TRAINING_DAYS) %>%
+      train_ensemble_models(Expansion_Set)
   return(ensembles)
 }
 
 train_feature_models <- function(Dataset) {
   feature_models_list <- list()
   for (feature in FEATURE_GENERATORS) {
-    feature_models <- train_model(Dataset$Features, Dataset$Labels, feature)
-    feature_models_list <- list.append(feature_models_list, gen = feature_models)
+    feature_models_list[[feature]] <-  train_model(Dataset$Features, Dataset$Labels, feature)
+   # feature_models_list <- list.append(feature_models_list, feature$Feature_Function = feature_models)
   }
   return(feature_models_list)
 }

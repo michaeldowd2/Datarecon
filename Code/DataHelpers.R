@@ -62,6 +62,23 @@ offset_columns <- function(Data, Columns, Lags = NULL, Leads = NULL) {
   res %>%  drop_na() %>% return()
 }
 
+extract_dates <-  function(Features, Labels) {
+  dates <- Features %>%
+    merge(Labels, by = "Date", all = FALSE) %>%
+    select(Date)
+  if (USE_LATEST_DATE == TRUE) {
+    date <-  tail(sort(dates$Date), n = 1)
+  }
+  else {
+    date <- DATE
+  }
+  dates <- dates %>%
+    filter(Date <= date) %>%
+    arrange(desc(Date)) %>%
+    top_n(MODEL_TRAINING_DAYS + ENSEMBLE_TRAINING_DAYS)
+  return(dates)
+}
+
 # --------------------------------------------------------
 # Create dateranges for datasets--------------------------
 create_dateranges <- function(Features, Labels, Analysis_Mode, Backtest_Days, Model_Training_Days, Ensemble_Training_Days) {

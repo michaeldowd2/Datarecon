@@ -17,17 +17,36 @@ This is a set of parameterised r-markdown files designed to automatically detect
 
 ----
 
-At a high level, the system is being designed to run a number of sequential steps on a daily basis. Some thought has been put into how to deal with the staggered availability of time-series data, in particular at what point to run the predictive models to allow for the most up to date data and at what point and with which data to retrain them. The daily process would look like this:
+At a high level, the system is being designed to run a number of sequential steps on a daily basis. Some thought has been put into how to deal with the staggered availability of time-series data, in particular at what point to run the predictive models to allow for the most up to date data and at what point and with which data to retrain them. The daily process will look like this:
 
-1. Scrape prediction data (eg for stock prices, market Opening price may be required) ^1^
+Morning Process (eg. at market opening)
+
+For each dataset:
+
+1. Scrape latest available data (eg for stock prices, market Opening price can be used for predictions) ^1^
+
+For each Predictor
+
 1. Loads most recent saved models ^1^
-2. Load the time series data, including scraped datapoints
+2. Load the time series data
 3. Run predictive models ^1^
-4. At a point when all data is published for current date, scrape the rest of the data (eg at market close, clowing price, high, low and volume are available) ^1^
-2. Train a new set of regression and ensemble models using the most up-to-date data for the selected date
-5. Saves these models ^1^
+4. Update Prediction Log
+
+
+Evening Process (eg. after market close)
+
+For each dataset:
+
+1. scrape the rest of the data (eg closing price, high, low and volume are available) ^1^
+
+For each Predictor
+
+1. Train a new set of regression and ensemble models using the most up-to-date data for the selected date
+2. Saves these models ^1^
 
 ^1^ Not implemented
+
+----
 
 ![Summary of iterative training and prediction process](https://raw.githubusercontent.com/michaeldowd2/Datarecon/master/Images/TrainingAndPredictionSummary.JPG){ width=480px }
 
