@@ -88,7 +88,7 @@ labels <- master_data %>%
 dates <- extract_dates(features, labels)
 ```
 
-#### Feature Expansion and Modelling
+#### Feature Expansions and Predictor Training
 ```{r train or load models}
 models <- train_models(dates, features, labels)
 ```
@@ -105,7 +105,7 @@ do.call("grid.arrange", c(chart_models_list(models), ncol=(length(CARET_MODELS)+
 
 ----
 
-#### Ensemble Models
+#### Ensemble Training
 ```{r train or load ensembles, fig.width = 12, fig.height = 4}
 ensembles <- train_ensembles(dates, features, labels, models)
 ```
@@ -118,4 +118,9 @@ The ensemble model collection is created using predictions from the models of th
 ``` {r Grid Search Cross Validataion Ensemble Charts, fig.width = 20}
 do.call("grid.arrange", c(chart_ensembles_list(ensembles), ncol=(length(CARET_MODELS)+1)))
 ``` 
+
 ----
+
+``` {r Look for patterns in accuracy across models and features}
+summary <- summary_dataframe(dates, features, labels, models, ensembles)
+``` 

@@ -185,9 +185,29 @@ model_predict <- function(Features, Labels, Expansion_Set) {
   return(end_results)
 }
 
-model_summary_dataframe <- function(Dataset, Expansion_Set) {
-  labels <- Dataset$Labels
-  names(labels)[2] <- "Label"
-  predictions <- model_predict(Dataset$Features, labels, Expansion_Set)
-  df <- data.frame(matrix(ncol=4, nrow=0, dimnames=list(NULL, c('date', 'model_type', 'feature_type', 'test_accuracy'))))
+summary_dataframe <- function(Dates, Features, Labels, Models, Ensembles) {
+  res <- data.frame(matrix(ncol=6, nrow=0, dimnames=list(NULL, c('Date','Model_Name', 'Feature_Name','Dataset', 'RMSE', 'Rsquared'))))
+  
+  testing_data <- extract_training_data(Dates, Features, Labels, Mode = 'ENSEMBLE', ENSEMBLE_TRAINING_DAYS)
+  names(testing_data$Labels)[2] <- "Label"
+  
+  feature_replacer <- vector(mode='character',length=length(FEATURE_GENERATORS))
+  names(feature_replacer) <- FEATURE_GENERATORS
+  
+  model_replacer <- vector(mode='character',length=length(CARET_MODELS))
+  names(model_replacer) <- names(CARET_MODELS)
+  
+  date <- Dates$Date[1]
+  predictions <- model_predict(testing_data$Features, testing_data$Labels, Models)
+  for (i in 3:ncol(predictions)) {
+    model_name <-  str_replace_all(colnames(predictions)[i], feature_replacer) %>% str_replace_all("_", " ") %>% trimws()
+    feature_name <- str_replace_all(colnames(predictions)[i], model_replacer) %>% str_replace_all("_", " ") %>% trimws()
+    acc <- postResample(pred = predictions[i], obs = predictions[2])
+    rmse <- acc['RMSE']
+    rsquared <- acc['Rsquared']
+    df <- data.frame(date, model_name, feature_name, "Test", rmse, rsquared)
+    names(df) <- c('Date', 'Model_Name', 'Feature_Name', 'Dataset', 'RMSE', 'Rsquared')
+    res <- rbind(res, df)
+  }
+  return(res)
 }
