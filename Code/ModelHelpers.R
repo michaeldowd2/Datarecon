@@ -4,9 +4,9 @@ train_models <- function(Dates, Features, Labels) {
   return(models)
 }
 
-train_ensembles <- function(Dates, Features, Labels, Expansion_Set) {
+train_ensembles <- function(Dates, Features, Labels, Models) {
   ensembles = extract_training_data(Dates, Features, Labels, Mode = 'ENSEMBLE', ENSEMBLE_TRAINING_DAYS) %>%
-      train_ensemble_models(Expansion_Set)
+      train_ensemble_models(Models)
   return(ensembles)
 }
 
@@ -134,11 +134,11 @@ de_standardise <- function(Dataset, Means, SDs) {
   return(res)
 }
 
-train_ensemble_models <- function(Dataset, Expansion_Set) {
+train_ensemble_models <- function(Dataset, Models) {
   labels <- Dataset$Labels
   names(labels)[2] <- "Label"
   
-  model_predictions <- model_predict(Dataset$Features, labels, Expansion_Set) %>%
+  model_predictions <- model_predict(Dataset$Features, labels, Models) %>%
                        select(-Date)
   
   xgbTree_imp <- xgb_tree_importance(model_predictions)
@@ -158,10 +158,10 @@ train_ensemble_models <- function(Dataset, Expansion_Set) {
   return(ensemble_model_list)
 }
 # Predicion Features for ensemble
-model_predict <- function(Features, Labels, Expansion_Set) {
+model_predict <- function(Features, Labels, Models) {
   end_results <- Labels
-  for (i in 1 : length(Expansion_Set)) {
-    expansion <-  Expansion_Set[[i]]
+  for (i in 1 : length(Models)) {
+    expansion <-  Models[[i]]
     
     engineered <- Features %>% 
       match.fun(expansion$Feature_Function)() %>%
@@ -179,35 +179,69 @@ model_predict <- function(Features, Labels, Expansion_Set) {
       column_name <- paste(names(expansion)[i], expansion$Feature_Function, sep='_')
       results[[column_name]] <- predictions
     }
-    end_results <- end_results %>%
-      merge(results, by = "Date", all = FALSE)
+    end_results <- end_results %>% merge(results, by = "Date", all = FALSE)
   }
   return(end_results)
 }
 
+#ensemble predictions
+ensemble_predict <- function(Model_Predictions, Ensembles) {
+  end_results <- Model_Predictions %>% select(Date, Label)
+  
+  for (i in seq(2, length(Ensembles), by = 2))  {
+    model <- Ensembles[[i]]
+    predictions <- predict(model, newdata = training_data)
+    column_name <- paste(names(expansion)[i], expansion$Feature_Function, sep='_')
+    results[[column_name]] <- predictions
+  }
+  end_results <- end_results %>% merge(results, by = "Date", all = FALSE)
+  return(end_results)
+  
+}
+
 summary_dataframe <- function(Dates, Features, Labels, Models, Ensembles) {
   res <- data.frame(matrix(ncol=6, nrow=0, dimnames=list(NULL, c('Date','Model_Name', 'Feature_Name','Dataset', 'RMSE', 'Rsquared'))))
-  
-  testing_data <- extract_training_data(Dates, Features, Labels, Mode = 'ENSEMBLE', ENSEMBLE_TRAINING_DAYS)
-  names(testing_data$Labels)[2] <- "Label"
-  
+  date <- Dates$Date[1]
   feature_replacer <- vector(mode='character',length=length(FEATURE_GENERATORS))
   names(feature_replacer) <- FEATURE_GENERATORS
-  
   model_replacer <- vector(mode='character',length=length(CARET_MODELS))
   names(model_replacer) <- names(CARET_MODELS)
   
-  date <- Dates$Date[1]
-  predictions <- model_predict(testing_data$Features, testing_data$Labels, Models)
-  for (i in 3:ncol(predictions)) {
-    model_name <-  str_replace_all(colnames(predictions)[i], feature_replacer) %>% str_replace_all("_", " ") %>% trimws()
-    feature_name <- str_replace_all(colnames(predictions)[i], model_replacer) %>% str_replace_all("_", " ") %>% trimws()
-    acc <- postResample(pred = predictions[i], obs = predictions[2])
-    rmse <- acc['RMSE']
-    rsquared <- acc['Rsquared']
-    df <- data.frame(date, model_name, feature_name, "Test", rmse, rsquared)
-    names(df) <- c('Date', 'Model_Name', 'Feature_Name', 'Dataset', 'RMSE', 'Rsquared')
-    res <- rbind(res, df)
+  model_training_data <- extract_training_data(Dates, Features, Labels, Mode = 'MODEL',MODEL_TRAINING_DAYS)
+  names(model_training_data$Labels)[2] <- "Label"
+  ensemble_training_data <- extract_training_data(Dates, Features, Labels, Mode = 'ENSEMBLE', ENSEMBLE_TRAINING_DAYS)
+  names(ensemble_training_data$Labels)[2] <- "Label"
+  
+  model_training_predictions <- model_predict(model_training_data$Features, model_training_data$Labels, Models)
+  model_test_predictions <- model_predict(ensemble_training_data$Features, ensemble_training_data$Labels, Models)
+  
+  for (i in 3:ncol(model_test_predictions)) {
+    model_name <-  str_replace_all(colnames(model_test_predictions)[i], feature_replacer) %>% str_replace_all("_", " ") %>% trimws()
+    feature_name <- str_replace_all(colnames(model_test_predictions)[i], model_replacer) %>% str_replace_all("_", " ") %>% trimws()
+    
+    model_train_acc <- postResample(pred = model_training_predictions[i], obs = model_training_predictions[2])
+    train_row <- data.frame(date, model_name, feature_name, "Train", model_train_acc['RMSE'], model_train_acc['Rsquared'])
+    names(train_row) <- c('Date', 'Model_Name', 'Feature_Name', 'Dataset', 'RMSE', 'Rsquared')
+    res <- rbind(res, train_row)
+    
+    model_test_acc <- postResample(pred = model_test_predictions[i], obs = model_test_predictions[2])
+    test_row <- data.frame(date, model_name, feature_name, "Test", model_test_acc['RMSE'], model_test_acc['Rsquared'])
+    names(test_row) <- c('Date', 'Model_Name', 'Feature_Name', 'Dataset', 'RMSE', 'Rsquared')
+    res <- rbind(res, test_row)
   }
+  
+  
+  # ensemble_predictions <- ensemble_predict(ensemble_test_data$Features, ensemble_test_data$Labels, Models)
+  # for (i in 3:ncol(predictions)) {
+  #   model_name <-  str_replace_all(colnames(predictions)[i], '_ensemble')
+  #   feature_name <- 'ensemble'
+  #   acc <- postResample(pred = ensemble_predictions[i], obs = ensemble_predictions[2])
+  #   rmse <- acc['RMSE']
+  #   rsquared <- acc['Rsquared']
+  #   df <- data.frame(date, model_name, feature_name, "Test", rmse, rsquared)
+  #   names(df) <- c('Date', 'Model_Name', 'Feature_Name', 'Dataset', 'RMSE', 'Rsquared')
+  #   res <- rbind(res, df)
+  # }
+  
   return(res)
 }
